@@ -2,7 +2,7 @@
 (function () {
   if (window.__cnHook) return;
   window.__cnHook = true;
-  var M = window.__cnMedia = { v: {}, s: {}, log: [] };
+  var M = window.__cnMedia = { v: {}, s: {}, log: [], body: {} };
   var RX = /https?:\/\/[^"'\s\\<>]+?\.(mp4|mkv|webm|m4v|srt|vtt|ass|ssa)(\?[^"'\s\\<>]*)?/gi;
   function add(u, label) {
     var p = u.split('?')[0].toLowerCase();
@@ -25,8 +25,20 @@
       else if (v && typeof v === 'object') walk(v, d + 1);
     }
   }
+  function looksSub(t) {
+    var h = t.slice(0, 600);
+    return /^\uFEFF?WEBVTT/.test(h) || h.indexOf('[Script Info]') !== -1 ||
+      /\d{1,2}:\d{2}:\d{2}[,.]\d{1,3}\s*-->\s*\d{1,2}:\d{2}:\d{2}[,.]\d{1,3}/.test(h);
+  }
   function scanText(t, url) {
     if (!t || t.length > 3000000) return;
+    if (typeof t === 'string' && looksSub(t)) {
+      var keys = Object.keys(M.body); if (keys.length > 8) delete M.body[keys[0]];
+      M.body[String(url)] = t;
+      M.s[String(url)] = M.s[String(url)] || (/[\u0600-\u06FF]/.test(t.slice(0, 4000)) ? 'عربي' : '');
+      if (M.log.length < 40) M.log.push('SUBBODY ' + String(url).slice(0, 150));
+      return;
+    }
     try { walk(JSON.parse(t), 0); } catch (e) { var m; RX.lastIndex = 0; while ((m = RX.exec(t))) add(m[0], ''); }
     if (M.log.length < 40) M.log.push(String(url).slice(0, 160));
   }
@@ -35,7 +47,7 @@
     if (of) window.fetch = function () {
       var u = arguments[0] && (arguments[0].url || arguments[0]);
       return of.apply(this, arguments).then(function (r) {
-        try { var ct = (r.headers.get('content-type') || ''); if (/json|text|javascript/.test(ct)) r.clone().text().then(function (t) { scanText(t, u); }); } catch (e) {}
+        try { var ct = (r.headers.get('content-type') || ''); if (/json|text|javascript|octet|subrip|vtt/.test(ct) || /\.(srt|vtt|ass|ssa)(\?|$)/i.test(String(u))) r.clone().text().then(function (t) { scanText(t, u); }); } catch (e) {}
         return r;
       });
     };

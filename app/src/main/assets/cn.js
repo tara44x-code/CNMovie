@@ -2,7 +2,7 @@
 (function () {
   if (window.__cnHook) return;
   window.__cnHook = true;
-  var M = window.__cnMedia = { v: {}, s: {}, log: [] };
+  var M = window.__cnMedia = { v: {}, s: {}, log: [], body: {} };
   var RX = /https?:\/\/[^"'\s\\<>]+?\.(mp4|mkv|webm|m4v|srt|vtt|ass|ssa)(\?[^"'\s\\<>]*)?/gi;
   function add(u, label) {
     var p = u.split('?')[0].toLowerCase();
@@ -25,8 +25,20 @@
       else if (v && typeof v === 'object') walk(v, d + 1);
     }
   }
+  function looksSub(t) {
+    var h = t.slice(0, 600);
+    return /^\uFEFF?WEBVTT/.test(h) || h.indexOf('[Script Info]') !== -1 ||
+      /\d{1,2}:\d{2}:\d{2}[,.]\d{1,3}\s*-->\s*\d{1,2}:\d{2}:\d{2}[,.]\d{1,3}/.test(h);
+  }
   function scanText(t, url) {
     if (!t || t.length > 3000000) return;
+    if (typeof t === 'string' && looksSub(t)) {
+      var keys = Object.keys(M.body); if (keys.length > 8) delete M.body[keys[0]];
+      M.body[String(url)] = t;
+      M.s[String(url)] = M.s[String(url)] || (/[\u0600-\u06FF]/.test(t.slice(0, 4000)) ? 'عربي' : '');
+      if (M.log.length < 40) M.log.push('SUBBODY ' + String(url).slice(0, 150));
+      return;
+    }
     try { walk(JSON.parse(t), 0); } catch (e) { var m; RX.lastIndex = 0; while ((m = RX.exec(t))) add(m[0], ''); }
     if (M.log.length < 40) M.log.push(String(url).slice(0, 160));
   }
@@ -35,7 +47,7 @@
     if (of) window.fetch = function () {
       var u = arguments[0] && (arguments[0].url || arguments[0]);
       return of.apply(this, arguments).then(function (r) {
-        try { var ct = (r.headers.get('content-type') || ''); if (/json|text|javascript/.test(ct)) r.clone().text().then(function (t) { scanText(t, u); }); } catch (e) {}
+        try { var ct = (r.headers.get('content-type') || ''); if (/json|text|javascript|octet|subrip|vtt/.test(ct) || /\.(srt|vtt|ass|ssa)(\?|$)/i.test(String(u))) r.clone().text().then(function (t) { scanText(t, u); }); } catch (e) {}
         return r;
       });
     };
@@ -76,12 +88,18 @@ window.CNSub = function (id, url) {
     }
     return null;
   }
+  var B = (window.__cnMedia || {}).body || {};
+  if (B[url]) { send('text', B[url]); return; }
+  var bk = Object.keys(B), fname = String(url).split('?')[0].split('/').pop();
+  for (var i = 0; i < bk.length; i++) if (fname && bk[i].indexOf(fname) !== -1) { send('text', B[bk[i]]); return; }
   fetch(url, { credentials: 'include' }).then(function (r) {
     if (!r.ok) throw new Error('HTTP ' + r.status);
     return r.text();
   }).then(function (t) { send('text', t); }).catch(function (err) {
     var cues = fromTracks();
+    var bk2 = Object.keys(B);
     if (cues) send('cues', cues);
+    else if (bk2.length) send('text', B[bk2[bk2.length - 1]]);
     else setTimeout(function () { var c2 = fromTracks(); send(c2 ? 'cues' : 'error', c2 || String(err)); }, 1500);
   });
 };
@@ -178,13 +196,70 @@ window.CNSub = function (id, url) {
     if (age > 8000) { clearInterval(poll); ready(); }
   }, 200);
 
+  // ---------- اسم وشعار CN.MOVIE بدل سينمانا ----------
+  function swapLogo(im) {
+    if (!window.__cnLogo || im.getAttribute('data-cnb')) return;
+    im.setAttribute('data-cnb', '1');
+    if (im.tagName === 'IMG') { im.src = window.__cnLogo; im.removeAttribute('srcset'); im.style.borderRadius = '10px'; return; }
+    var r = im.getBoundingClientRect(), n = document.createElement('img');
+    n.src = window.__cnLogo; n.setAttribute('data-cnb', '1');
+    n.style.cssText = 'width:' + Math.max(28, r.width) + 'px;height:' + Math.max(28, r.height) + 'px;border-radius:10px;vertical-align:middle';
+    im.parentNode.insertBefore(n, im); im.style.display = 'none';
+  }
+  function brand() {
+    var els = document.querySelectorAll('span,div,h1,h2,h3,h4,p,a,b,strong');
+    for (var i = 0; i < els.length; i++) {
+      var e = els[i];
+      if (e.childElementCount !== 0 || e.getAttribute('data-cnb')) continue;
+      var t = txt(e);
+      if (t !== 'سينمانا' && t !== 'سينمــانا' && t !== 'سينمـــانا' && t.toLowerCase() !== 'cinemana') continue;
+      e.setAttribute('data-cnb', '1');
+      e.innerHTML = 'CN<span style="color:#FF2BD6;text-shadow:0 0 10px #FF2BD6">.MOVIE</span>';
+      e.style.direction = 'ltr'; e.style.color = '#fff'; e.style.fontWeight = '800';
+      e.style.letterSpacing = '1px'; e.style.textShadow = '0 0 10px #22E4FF';
+      var box = e.parentElement;
+      for (var up = 0; up < 3 && box; up++) {
+        var im = box.querySelector('img:not([data-cnb]),svg:not([data-cnb])');
+        if (im) { swapLogo(im); break; }
+        box = box.parentElement;
+      }
+    }
+  }
+  // ---------- حذف عناصر ما نحتاجها من القائمة ----------
+  var HIDE = ['مركز المساعدة', 'تطبيقات شبكتي'];
+  function hideEl(e) { if (e) e.style.setProperty('display', 'none', 'important'); }
+  function prune() {
+    var els = document.querySelectorAll('a,button,li,span,div,p');
+    for (var i = 0; i < els.length; i++) {
+      var e = els[i];
+      if (e.childElementCount > 2) continue;
+      var t = txt(e);
+      if (HIDE.indexOf(t) !== -1) hideEl(e.closest('li,a,button,mat-list-item,[role=listitem],[role=menuitem]') || e.parentElement);
+    }
+    var soc = document.querySelectorAll('a[href*="twitter.com"],a[href*="x.com/"],a[href*="youtube.com"],a[href*="youtu.be"],a[href*="t.me/"],a[href*="telegram"],a[href*="instagram.com"],a[href*="facebook.com"],a[href*="tiktok.com"]');
+    var parents = [];
+    for (var j = 0; j < soc.length; j++) {
+      if (txt(soc[j]).length > 2 || soc[j].closest('form')) continue;
+      hideEl(soc[j]);
+      if (parents.indexOf(soc[j].parentElement) === -1) parents.push(soc[j].parentElement);
+    }
+    parents.forEach(function (p) {
+      if (!p) return;
+      var vis = false;
+      for (var k = 0; k < p.children.length; k++) if (p.children[k].style.display !== 'none' && txt(p.children[k])) vis = true;
+      if (!vis) hideEl(p);
+    });
+  }
+
   var timer = null;
   new MutationObserver(function () {
     if (timer) return;
-    timer = setTimeout(function () { timer = null; skip(); neon(); }, 300);
+    timer = setTimeout(function () { timer = null; skip(); neon(); brand(); prune(); }, 300);
   }).observe(document.documentElement, { childList: true, subtree: true });
   skip();
   neon();
+  brand();
+  prune();
 
   function firstVisible(sels) {
     for (var i = 0; i < sels.length; i++) {

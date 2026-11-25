@@ -79,7 +79,10 @@ class MainActivity : AppCompatActivity() {
     private val introStart = SystemClock.uptimeMillis()
     private val INTRO_MS = 7000L   // مدة شعار البداية
     private val INTRO_MAX_MS = 11000L
-    private val helperJs by lazy { assets.open("cn.js").bufferedReader(Charsets.UTF_8).use { it.readText() } }
+    private val helperJs by lazy {
+        val logo = android.util.Base64.encodeToString(assets.open("logo96.png").use { it.readBytes() }, android.util.Base64.NO_WRAP)
+        "window.__cnLogo='data:image/png;base64,$logo';\n" + assets.open("cn.js").bufferedReader(Charsets.UTF_8).use { it.readText() }
+    }
     private lateinit var tabs: List<LinearLayout>
     private lateinit var player: PlayerGestureLayer
     private lateinit var root: FrameLayout
