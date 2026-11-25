@@ -48,8 +48,14 @@ jobs:
         run: |
           VER=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)
           TAG="v$VER"
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" CN.MOVIE.apk --clobber
-          else
-            gh release create "$TAG" CN.MOVIE.apk --title "CN.MOVIE $VER" --notes "تطوير: مهند سات لنك" --latest
-          fi
+          for i in 1 2 3; do
+            if gh release view "$TAG" >/dev/null 2>&1; then
+              gh release upload "$TAG" CN.MOVIE.apk --clobber && exit 0
+            else
+              gh release create "$TAG" CN.MOVIE.apk --title "CN.MOVIE $VER" --notes "تطوير: مهند سات لنك" --latest && exit 0
+            fi
+            sleep 20
+          done
+          # احتياط: نرفع على آخر إصدار موجود حتى يبقى رابط التحميل يعطي أحدث نسخة
+          LATEST=$(gh release list --limit 1 --json tagName -q '.[0].tagName')
+          gh release upload "$LATEST" CN.MOVIE.apk --clobber
