@@ -9,7 +9,11 @@ import android.content.pm.ActivityInfo
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.os.Message
+import android.view.Gravity
+import android.view.ViewGroup
 import android.os.Environment
 import android.text.SpannableString
 import android.text.Spanned
@@ -36,13 +40,22 @@ import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 
 class MainActivity : AppCompatActivity() {
 
     companion object {
         const val HOME_URL = "https://cinemana.shabakaty.com/home"
         // النطاقات التي تفتح داخل التطبيق؛ أي رابط غيرها يفتح بالمتصفح
-        val INTERNAL_HOSTS = listOf("shabakaty.com", "earthlink.iq")
+        val INTERNAL_HOSTS = listOf(
+            "shabakaty.com", "earthlink.iq",
+            // تسجيل الدخول بـ Google و Facebook يبقى داخل التطبيق
+            "google.com", "google.iq", "googleapis.com", "gstatic.com", "googleusercontent.com", "accounts.youtube.com",
+            "facebook.com", "fb.com", "facebook.net", "fbcdn.net"
+        )
+        fun isInternal(host: String) = INTERNAL_HOSTS.any { host == it || host.endsWith(".$it") }
     }
 
     private lateinit var web: WebView
@@ -58,6 +71,11 @@ class MainActivity : AppCompatActivity() {
     private var splashHidden = false
     private val helperJs by lazy { assets.open("cn.js").bufferedReader(Charsets.UTF_8).use { it.readText() } }
     private lateinit var tabs: List<LinearLayout>
+    private lateinit var player: PlayerGestureLayer
+    private lateinit var root: FrameLayout
+    private var popupHolder: View? = null
+    private var popupWeb: WebView? = null
+    private lateinit var cleanUa: String
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -95,7 +113,16 @@ class MainActivity : AppCompatActivity() {
             cacheMode = WebSettings.LOAD_DEFAULT
             mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
             setSupportZoom(false)
+            setSupportMultipleWindows(true)
+            javaScriptCanOpenWindowsAutomatically = true
         }
+        // متصفح عادي بدل علامة WebView حتى تقبل Google تسجيل الدخول
+        cleanUa = web.settings.userAgentString.replace("; wv", "").replace(Regex("Version/\\d+(\\.\\d+)* "), "")
+        web.settings.userAgentString = cleanUa
+
+        root = findViewById(android.R.id.content)
+        player = PlayerGestureLayer(this, web).apply { visibility = View.GONE }
+        root.addView(player, FrameLayout.LayoutParams(-1, -1))
         // حفظ تسجيل الدخول (الكوكيز) بين مرات فتح التطبيق
         CookieManager.getInstance().setAcceptCookie(true)
         CookieManager.getInstance().setAcceptThirdPartyCookies(web, true)
@@ -104,10 +131,12 @@ class MainActivity : AppCompatActivity() {
         web.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                 val uri = request.url
-                val host = uri.host ?: return false
-                if (uri.scheme == "http" || uri.scheme == "https") {
-                    if (INTERNAL_HOSTS.any { host == it || host.endsWith(".$it") }) return false
+                if (uri.scheme == "intent") {
+                    try { startActivity(Intent.parseUri(uri.toString(), Intent.URI_INTENT_SCHEME)) } catch (_: Exception) { }
+                    return true
                 }
+                val host = uri.host ?: return false
+                if ((uri.scheme == "http" || uri.scheme == "https") && isInternal(host)) return false
                 openExternal(uri)
                 return true
             }
@@ -149,12 +178,24 @@ class MainActivity : AppCompatActivity() {
                 fullscreen.addView(view, FrameLayout.LayoutParams(-1, -1))
                 fullscreen.visibility = View.VISIBLE
                 content.visibility = View.GONE
-                window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN or WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                player.target = view
+                player.reset()
+                player.visibility = View.VISIBLE
+                player.bringToFront()
+                setImmersive(true)
                 requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
             }
 
             override fun onHideCustomView() {
                 exitFullscreen()
+            }
+
+            // نوافذ منبثقة (تسجيل الدخول بـ Google / Facebook)
+            override fun onCreateWindow(view: WebView, isDialog: Boolean, isUserGesture: Boolean, resultMsg: Message): Boolean {
+                val popup = openPopup()
+                (resultMsg.obj as WebView.WebViewTransport).webView = popup
+                resultMsg.sendToTarget()
+                return true
             }
         }
 
@@ -194,6 +235,7 @@ class MainActivity : AppCompatActivity() {
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 when {
+                    popupWeb != null -> if (popupWeb!!.canGoBack()) popupWeb!!.goBack() else closePopup()
                     customView != null -> exitFullscreen()
                     web.canGoBack() -> web.goBack()
                     System.currentTimeMillis() - lastBack < 2000 -> finish()
@@ -251,8 +293,98 @@ class MainActivity : AppCompatActivity() {
         customView = null
         customCallback?.onCustomViewHidden()
         customCallback = null
-        window.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN or WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        player.visibility = View.GONE
+        player.target = null
+        player.restoreBrightness()
+        setImmersive(false)
         requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+    }
+
+    private fun setImmersive(on: Boolean) {
+        val ctl = WindowCompat.getInsetsController(window, window.decorView)
+        if (on) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            ctl.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            ctl.hide(WindowInsetsCompat.Type.systemBars())
+        } else {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            ctl.show(WindowInsetsCompat.Type.systemBars())
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            val lp = window.attributes
+            lp.layoutInDisplayCutoutMode = if (on) WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+            else WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT
+            window.attributes = lp
+        }
+    }
+
+    @SuppressLint("SetJavaScriptEnabled")
+    private fun openPopup(): WebView {
+        closePopup()
+        val dp = resources.displayMetrics.density
+        val holder = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(Color.parseColor("#07060F"))
+            isClickable = true
+        }
+        val bar = LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            setBackgroundResource(R.drawable.topbar_bg)
+            setPadding((16 * dp).toInt(), 0, (8 * dp).toInt(), 0)
+        }
+        bar.addView(TextView(this).apply {
+            text = "تسجيل الدخول"
+            setTextColor(Color.WHITE)
+            textSize = 17f
+            setShadowLayer(12f, 0f, 0f, Color.parseColor("#22E4FF"))
+        }, LinearLayout.LayoutParams(0, -2, 1f))
+        bar.addView(Button(this).apply {
+            text = getString(R.string.close)
+            setTextColor(Color.WHITE)
+            setBackgroundResource(R.drawable.neon_pill)
+            setOnClickListener { closePopup() }
+        }, LinearLayout.LayoutParams(-2, (40 * dp).toInt()))
+        holder.addView(bar, LinearLayout.LayoutParams(-1, (60 * dp).toInt()))
+
+        val pw = WebView(this)
+        with(pw.settings) {
+            javaScriptEnabled = true
+            domStorageEnabled = true
+            javaScriptCanOpenWindowsAutomatically = true
+            setSupportMultipleWindows(false)
+            userAgentString = cleanUa
+        }
+        CookieManager.getInstance().setAcceptThirdPartyCookies(pw, true)
+        pw.webViewClient = object : WebViewClient() {
+            override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+                val u = request.url
+                // بعد نجاح الدخول ورجوعه لسينمانا: نسكر النافذة ونحمّلها بالواجهة الرئيسية
+                if (u.host?.endsWith("shabakaty.com") == true) {
+                    closePopup()
+                    web.loadUrl(u.toString())
+                    return true
+                }
+                return u.scheme != "http" && u.scheme != "https"
+            }
+        }
+        pw.webChromeClient = object : WebChromeClient() {
+            override fun onCloseWindow(window: WebView) {
+                closePopup()
+            }
+        }
+        holder.addView(pw, LinearLayout.LayoutParams(-1, 0, 1f))
+        root.addView(holder, FrameLayout.LayoutParams(-1, -1))
+        popupHolder = holder
+        popupWeb = pw
+        return pw
+    }
+
+    private fun closePopup() {
+        popupWeb?.let { it.stopLoading(); it.destroy() }
+        popupHolder?.let { (it.parent as? ViewGroup)?.removeView(it) }
+        popupWeb = null
+        popupHolder = null
+        CookieManager.getInstance().flush()
     }
 
     private fun openExternal(uri: Uri) {

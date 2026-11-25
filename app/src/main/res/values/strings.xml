@@ -6,7 +6,7 @@
     <string name="offline_body">تأكد من اتصالك بالإنترنت ثم حاول مرة أخرى</string>
     <string name="retry">إعادة المحاولة</string>
     <string name="about_title">حول التطبيق</string>
-    <string name="about_body">CN.MOVIE — الإصدار 1.1\n\nتطوير: مهند سات لنك</string>
+    <string name="about_body">CN.MOVIE — الإصدار 1.2\n\nتطوير: مهند سات لنك</string>
     <string name="close">إغلاق</string>
     <string name="exit_hint">اضغط رجوع مرة ثانية للخروج</string>
     <string name="download_started">بدأ التحميل…</string>

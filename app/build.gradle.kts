@@ -11,8 +11,8 @@ android {
         applicationId = "com.muhannadsatlink.cnmovie"
         minSdk = 24
         targetSdk = 34
-        versionCode = 2
-        versionName = "1.1"
+        versionCode = 3
+        versionName = "1.2"
     }
 
     // مفتاح توقيع ثابت (اختياري): إذا وُجد app/release.jks وكلمة السر بالبيئة
