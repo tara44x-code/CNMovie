@@ -182,7 +182,7 @@ class MainActivity : AppCompatActivity() {
                 player.reset()
                 player.visibility = View.VISIBLE
                 player.bringToFront()
-                setImmersive(true)
+                setVideoImmersive(true)
                 requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
             }
 
@@ -296,11 +296,11 @@ class MainActivity : AppCompatActivity() {
         player.visibility = View.GONE
         player.target = null
         player.restoreBrightness()
-        setImmersive(false)
+        setVideoImmersive(false)
         requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
     }
 
-    private fun setImmersive(on: Boolean) {
+    private fun setVideoImmersive(on: Boolean) {
         val ctl = WindowCompat.getInsetsController(window, window.decorView)
         if (on) {
             window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
