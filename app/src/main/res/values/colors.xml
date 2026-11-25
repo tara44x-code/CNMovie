@@ -1,0 +1,9 @@
+<resources>
+    <color name="bg">#07060F</color>
+    <color name="surface">#12101F</color>
+    <color name="stroke">#2A2540</color>
+    <color name="text">#F2F0FF</color>
+    <color name="muted">#A9A4C6</color>
+    <color name="neon_cyan">#22E4FF</color>
+    <color name="neon_pink">#FF2BD6</color>
+</resources>

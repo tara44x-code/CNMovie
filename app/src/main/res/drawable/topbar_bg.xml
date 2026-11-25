@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item><color android:color="@color/bg" /></item>
+    <item android:gravity="bottom" android:height="1dp">
+        <shape><gradient android:startColor="@color/neon_cyan" android:endColor="@color/neon_pink" /></shape>
+    </item>
+</layer-list>
