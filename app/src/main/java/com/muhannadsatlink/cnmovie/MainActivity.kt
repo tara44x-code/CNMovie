@@ -152,7 +152,15 @@ class MainActivity : AppCompatActivity() {
         // الصفحة تبلّغنا لما تجهز (بعد تخطي صفحة «حمّل التطبيق»)
         web.addJavascriptInterface(object {
             @JavascriptInterface fun ready() { runOnUiThread { hideSplash() } }
+            @JavascriptInterface fun subResult(id: String, kind: String, data: String) { downloader.onSubResult(id, kind, data) }
         }, "CNApp")
+        // نلقط ردود الموقع من أول لحظة (قبل سكربتات الموقع)
+        try {
+            if (androidx.webkit.WebViewFeature.isFeatureSupported(androidx.webkit.WebViewFeature.DOCUMENT_START_SCRIPT)) {
+                androidx.webkit.WebViewCompat.addDocumentStartJavaScript(web,
+                    assets.open("hook.js").bufferedReader(Charsets.UTF_8).use { it.readText() }, setOf("*"))
+            }
+        } catch (_: Throwable) { }
 
         web.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {

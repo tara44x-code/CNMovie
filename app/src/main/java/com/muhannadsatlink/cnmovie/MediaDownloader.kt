@@ -63,6 +63,54 @@ class MediaDownloader(private val act: AppCompatActivity, private val web: WebVi
 
     fun clear() { seen.clear(); apiSeen.clear() }
 
+    // ---------- تقرير التشخيص ----------
+    private val diag: MutableList<String> = Collections.synchronizedList(ArrayList())
+    private fun log(s: String) { synchronized(diag) { diag += s; while (diag.size > 80) diag.removeAt(0) } }
+    private fun diagText(): String = buildString {
+        append("CN.MOVIE ${BuildConfigInfo.version(act)} • Android ${Build.VERSION.SDK_INT}\n")
+        append("page: ${web.url}\n")
+        synchronized(apiSeen) { apiSeen.forEach { append("API $it\n".take(240)) } }
+        synchronized(diag) { diag.forEach { append(it.take(300)).append('\n') } }
+    }
+    private fun copyDiag() {
+        val cm = act.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+        cm.setPrimaryClip(android.content.ClipData.newPlainText("CN.MOVIE diag", diagText()))
+        toast("انتسخ تقرير التشخيص، الصقه ودزّه")
+    }
+
+    // ---------- الترجمة عن طريق الصفحة نفسها ----------
+    private class PendingSub(val url: String, val format: String, val base: String)
+    private val pending = HashMap<String, PendingSub>()
+
+    fun onSubResult(id: String, kind: String, data: String) {
+        val p = synchronized(pending) { pending.remove(id) } ?: return
+        Thread {
+            try {
+                val cues: List<Cue> = when (kind) {
+                    "text" -> parse(data)
+                    "cues" -> {
+                        val arr = org.json.JSONArray(data)
+                        (0 until arr.length()).map { i -> val c = arr.getJSONArray(i)
+                            Cue((c.getDouble(0) * 1000).toLong(), (c.getDouble(1) * 1000).toLong(), c.getString(2).replace(Regex("<[^>]+>"), "")) }
+                    }
+                    else -> { log("SUB page-fail ${data.take(150)} ${p.url}"); parse(decode(fetch(p.url))) }
+                }
+                log("SUB ok via $kind cues=${cues.size}")
+                writeSub(cues, p.format, p.base)
+            } catch (e: Throwable) {
+                log("SUB ERR ${e.javaClass.simpleName}: ${e.message} ${p.url}")
+                act.runOnUiThread { toast("تعذّر تحميل الترجمة — اضغط «نسخ تقرير التشخيص» ودزّه") }
+            }
+        }.start()
+    }
+
+    private fun writeSub(cues: List<Cue>, format: String, base: String) {
+        val out = when (format) { "VTT" -> toVtt(cues); "ASS" -> toAss(cues); else -> toSrt(cues) }
+        val name = safe("$base.${format.lowercase()}")
+        save(name, out.toByteArray(Charsets.UTF_8))
+        act.runOnUiThread { toast(if (cues.isEmpty()) "الترجمة فارغة" else "انحفظت الترجمة: Download/CN.MOVIE/$name") }
+    }
+
     // ---------- النافذة ----------
     fun show() {
         web.evaluateJavascript(SCAN_JS) { raw ->
@@ -71,17 +119,23 @@ class MediaDownloader(private val act: AppCompatActivity, private val web: WebVi
             try {
                 val json = JSONObject(org.json.JSONTokener(raw).nextValue() as String)
                 val v = json.getJSONArray("v")
-                for (i in 0 until v.length()) addVideo(videos, v.getString(i))
+                for (i in 0 until v.length()) {
+                    val o = v.getJSONObject(i)
+                    addVideo(videos, o.optString("src"), o.optString("label"))
+                }
+                log("JS hook=${json.optBoolean("hook")} videos=${v.length()} subs=${json.getJSONArray("s").length()}")
+                json.optJSONArray("log")?.let { l -> for (i in 0 until l.length()) log("XHR ${l.optString(i)}") }
                 val s = json.getJSONArray("s")
                 for (i in 0 until s.length()) {
                     val o = s.getJSONObject(i)
                     addSub(subs, o.getString("src"), o.optString("label"))
                 }
-            } catch (_: Exception) { }
+            } catch (e: Exception) { log("SCAN ERR ${e.javaClass.simpleName}: ${e.message} raw=${raw.take(200)}") }
             synchronized(seen) {
                 seen.reversed().forEach { u ->
                     val p = u.substringBefore('?').lowercase()
                     if (SUB_EXT.any { p.endsWith(it) }) addSub(subs, u, "") else addVideo(videos, u)
+                    log("NET $u".take(220))
                 }
             }
             toast("جارِ جمع الجودات والترجمات…")
@@ -256,12 +310,15 @@ class MediaDownloader(private val act: AppCompatActivity, private val web: WebVi
         }
     }
 
-    private fun addVideo(map: MutableMap<String, String>, u: String) {
-        if (!u.startsWith("http") || map.containsKey(u)) return
+    private fun addVideo(map: MutableMap<String, String>, u: String, label: String = "") {
+        if (!u.startsWith("http")) return
         val p = u.substringBefore('?').lowercase()
         if (p.endsWith(".m3u8")) return // بث مجزّأ؛ ما ينحفظ كملف واحد
-        val q = Regex("(2160|1440|1080|720|576|480|360|240)p?").find(p)?.groupValues?.get(1)
-        map[u] = if (q != null) "${q}p" else "جودة ${map.size + 1}"
+        val fromLabel = Regex("(\\d{3,4})").find(label)?.value
+        val q = fromLabel ?: Regex("(2160|1440|1080|720|576|480|360|240)p?").find(p)?.groupValues?.get(1)
+        val name = if (q != null) "${q}p" else label.ifBlank { "" }
+        if (map.containsKey(u) && (map[u]!!.isNotBlank() || name.isBlank())) return
+        map[u] = name
     }
 
     private fun addSub(map: MutableMap<String, String>, u: String, label: String) {
@@ -394,6 +451,13 @@ class MediaDownloader(private val act: AppCompatActivity, private val web: WebVi
             })
         }
 
+        root.addView(TextView(act).apply {
+            text = "نسخ تقرير التشخيص"
+            setTextColor(Color.parseColor("#8C88A8")); textSize = 13f; gravity = Gravity.CENTER
+            setPadding(0, px(14), 0, px(4))
+            paintFlags = paintFlags or android.graphics.Paint.UNDERLINE_TEXT_FLAG
+            setOnClickListener { copyDiag() }
+        })
         dialog = AlertDialog.Builder(act, R.style.Theme_CNMovie_Dialog)
             .setTitle("تحميل")
             .setView(scroll)
@@ -427,15 +491,17 @@ class MediaDownloader(private val act: AppCompatActivity, private val web: WebVi
             headers.forEach { (k, x) -> c.setRequestProperty(k, x) }
             c.setRequestProperty("Range", "bytes=0-0")
             val cr = c.getHeaderField("Content-Range")
+            val code = c.responseCode
             v.size = cr?.substringAfter('/')?.toLongOrNull() ?: c.getHeaderField("Content-Length")?.toLongOrNull() ?: -1
+            log("PROBE $code size=${v.size} ${v.url}".take(240))
             c.disconnect()
-        } catch (_: Exception) { }
+        } catch (e: Exception) { log("PROBE ERR ${e.javaClass.simpleName}: ${e.message} ${v.url}".take(260)) }
         try {
             mp4Dims(v.url, headers)?.let { (w, h) ->
                 v.w = w; v.h = h
                 if (v.quality.startsWith("جودة")) v.quality = "${std(min(w, h))}p"
             }
-        } catch (_: Throwable) { }
+        } catch (e: Throwable) { log("DIMS ERR ${e.javaClass.simpleName}: ${e.message}") }
         v.done = true
     }
 
@@ -524,22 +590,14 @@ class MediaDownloader(private val act: AppCompatActivity, private val web: WebVi
 
     private fun downloadSub(url: String, format: String, base: String) {
         toast("جارِ تجهيز الترجمة…")
-        Thread {
-            try {
-                val text = decode(fetch(url))
-                val cues = parse(text)
-                val out = when (format) {
-                    "VTT" -> toVtt(cues)
-                    "ASS" -> toAss(cues)
-                    else -> toSrt(cues)
-                }
-                val name = safe("$base.${format.lowercase()}")
-                save(name, out.toByteArray(Charsets.UTF_8))
-                act.runOnUiThread { toast(if (cues.isEmpty()) "الملف فارغ أو صيغته غير معروفة" else "انحفظت الترجمة: Download/CN.MOVIE/$name") }
-            } catch (e: Exception) {
-                act.runOnUiThread { toast("تعذّر تحميل الترجمة") }
-            }
-        }.start()
+        val id = "s" + System.nanoTime()
+        synchronized(pending) { pending[id] = PendingSub(url, format, base) }
+        val q = org.json.JSONObject.quote(url)
+        web.evaluateJavascript("window.CNSub ? (CNSub('$id', $q), 'ok') : 'no'") { r ->
+            if (!r.contains("ok")) onSubResult(id, "error", "no CNSub")
+        }
+        // احتياط إذا الصفحة ما ردّت
+        web.postDelayed({ if (synchronized(pending) { pending.containsKey(id) }) onSubResult(id, "error", "timeout") }, 12000)
     }
 
     private var lastReferer: String? = null
@@ -658,12 +716,13 @@ class MediaDownloader(private val act: AppCompatActivity, private val web: WebVi
 
         // يجمع روابط الفيديو والترجمة من الصفحة (وداخل iframe من نفس الموقع)
         private const val SCAN_JS = "(function(){var V=[],S=[];function w(d){try{" +
-            "d.querySelectorAll('video').forEach(function(v){if(v.currentSrc)V.push(v.currentSrc);if(v.src)V.push(v.src);" +
-            "v.querySelectorAll('source').forEach(function(s){if(s.src)V.push(s.src)});" +
+            "d.querySelectorAll('video').forEach(function(v){if(v.currentSrc)V.push({src:v.currentSrc,label:v.videoHeight?v.videoHeight+'p':''});if(v.src)V.push({src:v.src,label:''});" +
+            "v.querySelectorAll('source').forEach(function(s){V.push({src:s.src,label:s.getAttribute('label')||s.getAttribute('size')||s.getAttribute('res')||s.getAttribute('title')||''})});" +
             "v.querySelectorAll('track').forEach(function(t){if(t.src)S.push({src:t.src,label:t.label||t.srclang||''})})});" +
             "d.querySelectorAll('a[href]').forEach(function(a){var h=a.href.split('?')[0].toLowerCase();" +
-            "if(/\\.(mp4|mkv|webm)$/.test(h))V.push(a.href);if(/\\.(vtt|srt|ass|ssa)$/.test(h))S.push({src:a.href,label:(a.innerText||'').trim()})});" +
+            "if(/\\.(mp4|mkv|webm)$/.test(h))V.push({src:a.href,label:(a.innerText||'').trim().slice(0,20)});if(/\\.(vtt|srt|ass|ssa)$/.test(h))S.push({src:a.href,label:(a.innerText||'').trim().slice(0,20)})});" +
             "d.querySelectorAll('iframe').forEach(function(f){try{w(f.contentDocument)}catch(e){}})}catch(e){}}" +
-            "w(document);return JSON.stringify({v:V.filter(function(x){return x.indexOf('blob:')!==0}),s:S});})()"
+            "w(document);var M=window.__cnMedia||{v:{},s:{},log:[]};for(var k in M.v)V.push({src:k,label:M.v[k]});for(var k2 in M.s)S.push({src:k2,label:M.s[k2]});" +
+            "return JSON.stringify({v:V.filter(function(x){return x.src&&x.src.indexOf('blob:')!==0}),s:S,log:M.log,hook:!!window.__cnHook});})()"
     }
 }
