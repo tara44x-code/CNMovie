@@ -7,6 +7,15 @@ import android.app.DownloadManager
 import android.content.ContentValues
 import android.content.Intent
 import android.graphics.Color
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
+import android.media.MediaMetadataRetriever
+import android.view.Gravity
+import android.view.View
+import android.widget.CheckBox
+import android.widget.LinearLayout
+import android.widget.ScrollView
+import android.widget.TextView
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
@@ -24,6 +33,7 @@ import java.nio.ByteBuffer
 import java.nio.charset.Charset
 import java.nio.charset.CodingErrorAction
 import java.util.Collections
+import kotlin.math.min
 
 class MediaDownloader(private val act: AppCompatActivity, private val web: WebView) {
 
@@ -91,37 +101,172 @@ class MediaDownloader(private val act: AppCompatActivity, private val web: WebVi
         map[u] = name
     }
 
+    // ---------- النافذة الاحترافية ----------
+    private class VInfo(val url: String, var quality: String) {
+        var ext = "MP4"; var size = -1L; var w = 0; var h = 0; var done = false
+    }
+
+    private var subFormat = "SRT"
+
     private fun buildDialog(videos: Map<String, String>, subs: List<Sub>) {
-        val labels = ArrayList<String>()
-        val actions = ArrayList<() -> Unit>()
-        videos.forEach { (u, q) ->
-            labels += "تحميل الفيلم — $q"
-            actions += { downloadFile(u, "${title()} $q.${ext(u, "mp4")}") }
+        val dp = act.resources.displayMetrics.density
+        fun px(v: Int) = (v * dp).toInt()
+        val cyan = Color.parseColor("#22E4FF"); val pink = Color.parseColor("#FF2BD6")
+        val muted = Color.parseColor("#A9A4C6")
+
+        // الترجمة العربية أولاً
+        val ordered = subs.sortedBy { if (it.label.contains("عرب") || it.label.lowercase().startsWith("ar")) 0 else 1 }
+        val arabic = ordered.firstOrNull()
+        val infos = videos.map { (u, q) -> VInfo(u, q).also { it.ext = ext(u, "mp4").uppercase() } }
+
+        val root = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL; setPadding(px(18), px(6), px(18), px(10)); layoutDirection = View.LAYOUT_DIRECTION_RTL }
+        val scroll = ScrollView(act).apply { addView(root) }
+
+        fun section(t: String) = TextView(act).apply {
+            text = t; setTextColor(cyan); textSize = 14f; setTypeface(typeface, Typeface.BOLD)
+            setPadding(0, px(14), 0, px(6)); setShadowLayer(10f, 0f, 0f, cyan)
         }
-        subs.forEach { s ->
-            listOf("SRT", "VTT", "ASS").forEach { f ->
-                labels += "ترجمة ${s.label} — $f"
-                actions += { downloadSub(s.url, f, "${title()} ${s.label}") }
-            }
-            labels += "ترجمة ${s.label} — الملف الأصلي"
-            actions += { downloadFile(s.url, "${title()} ${s.label}.${ext(s.url, "srt")}") }
-        }
-        labels += "فتح مجلد التحميلات"
-        actions += {
-            try { act.startActivity(Intent(DownloadManager.ACTION_VIEW_DOWNLOADS)) } catch (_: Exception) { }
+        fun card() = LinearLayout(act).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(px(14), px(12), px(14), px(12))
+            background = GradientDrawable().apply { setColor(Color.parseColor("#0E0C1A")); cornerRadius = 14 * dp; setStroke(px(1), Color.parseColor("#2A2540")) }
+            isClickable = true; isFocusable = true
+            layoutParams = LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = px(8) }
         }
 
-        val builder = AlertDialog.Builder(act, R.style.Theme_CNMovie_Dialog)
-            .setTitle("تحميل")
-            .setNegativeButton(R.string.close, null)
-        if (videos.isEmpty() && subs.isEmpty()) {
-            builder.setMessage("شغّل الفيلم أولاً لثواني، بعدين اضغط تحميل حتى نلقى روابط الفيديو والترجمة.")
-            builder.setPositiveButton("فتح مجلد التحميلات") { _, _ -> actions.last().invoke() }
-        } else {
-            builder.setItems(labels.toTypedArray()) { _, i -> actions[i].invoke() }
+        // خيارات الترجمة
+        val withSub = CheckBox(act).apply {
+            text = if (arabic != null) "مع ترجمة ${arabic.label} (نفس اسم الفيلم)" else "لا توجد ترجمة لهذا الفيلم"
+            isChecked = arabic != null; isEnabled = arabic != null
+            setTextColor(Color.WHITE); textSize = 15f
+            buttonTintList = android.content.res.ColorStateList.valueOf(pink)
         }
-        val d = builder.show()
-        d.window?.decorView?.setBackgroundColor(Color.parseColor("#12101F"))
+        val chips = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, px(4), 0, px(4)) }
+        val chipViews = ArrayList<TextView>()
+        fun paintChips() = chipViews.forEach { c ->
+            val on = c.text == subFormat
+            c.setTextColor(if (on) Color.WHITE else muted)
+            c.background = GradientDrawable().apply {
+                cornerRadius = 18 * dp
+                if (on) { colors = intArrayOf(pink, Color.parseColor("#A23BFF")); orientation = GradientDrawable.Orientation.LEFT_RIGHT }
+                else { setColor(Color.parseColor("#12101F")); setStroke(px(1), Color.parseColor("#2A2540")) }
+            }
+        }
+        listOf("SRT", "VTT", "ASS").forEach { f ->
+            val c = TextView(act).apply {
+                text = f; textSize = 14f; setTypeface(typeface, Typeface.BOLD); gravity = Gravity.CENTER
+                setPadding(px(18), px(7), px(18), px(7))
+                setOnClickListener { subFormat = f; paintChips() }
+            }
+            chipViews += c
+            chips.addView(c, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = px(8) })
+        }
+        paintChips()
+
+        lateinit var dialog: AlertDialog
+        val videoBox = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL }
+
+        fun detail(v: VInfo): String {
+            if (!v.done) return "${v.ext}  •  جارِ فحص الحجم والدقة…"
+            val parts = arrayListOf(v.ext)
+            if (v.w > 0 && v.h > 0) parts += "${v.w}×${v.h}"
+            if (v.size > 0) parts += size(v.size)
+            return parts.joinToString("  •  ")
+        }
+        fun renderVideos() {
+            videoBox.removeAllViews()
+            val sorted = if (infos.all { it.done }) infos.sortedByDescending { it.h } else infos
+            sorted.forEach { v ->
+                val c = card()
+                c.addView(TextView(act).apply {
+                    text = "تحميل الفيلم — ${v.quality}"; setTextColor(Color.WHITE); textSize = 16f; setTypeface(typeface, Typeface.BOLD)
+                })
+                c.addView(TextView(act).apply { text = "\u200F" + detail(v); setTextColor(muted); textSize = 13f; setPadding(0, px(3), 0, 0) })
+                c.setOnClickListener {
+                    val base = "${title()} ${v.quality}"
+                    downloadFile(v.url, "$base.${v.ext.lowercase()}")
+                    if (withSub.isChecked && arabic != null) downloadSub(arabic.url, subFormat, base)
+                    dialog.dismiss()
+                }
+                videoBox.addView(c)
+            }
+        }
+
+        if (infos.isNotEmpty()) {
+            root.addView(section("الفيلم"))
+            root.addView(videoBox)
+            renderVideos()
+        }
+        if (ordered.isNotEmpty()) {
+            root.addView(withSub)
+            root.addView(section("صيغة الترجمة"))
+            root.addView(chips)
+            root.addView(section("الترجمة فقط"))
+            ordered.forEach { sb ->
+                val c = card()
+                c.addView(TextView(act).apply { text = "ترجمة ${sb.label}"; setTextColor(Color.WHITE); textSize = 15f; setTypeface(typeface, Typeface.BOLD) })
+                c.addView(TextView(act).apply { text = "تنحفظ بالصيغة المختارة أعلاه"; setTextColor(muted); textSize = 12f })
+                c.setOnClickListener { downloadSub(sb.url, subFormat, "${title()} ${sb.label}"); dialog.dismiss() }
+                root.addView(c)
+            }
+        }
+        if (infos.isEmpty() && ordered.isEmpty()) {
+            root.addView(TextView(act).apply {
+                text = "شغّل الفيلم أولاً لثواني، بعدين اضغط تحميل حتى نلقى روابط الفيديو والترجمة."
+                setTextColor(Color.WHITE); textSize = 15f; setPadding(0, px(10), 0, px(10))
+            })
+        }
+
+        dialog = AlertDialog.Builder(act, R.style.Theme_CNMovie_Dialog)
+            .setTitle("تحميل")
+            .setView(scroll)
+            .setNegativeButton(R.string.close, null)
+            .setNeutralButton("مجلد التحميلات") { _, _ ->
+                try { act.startActivity(Intent(DownloadManager.ACTION_VIEW_DOWNLOADS)) } catch (_: Exception) { }
+            }
+            .show()
+        dialog.window?.decorView?.setBackgroundColor(Color.parseColor("#12101F"))
+
+        // فحص الحجم والدقة بالخلفية
+        infos.forEach { v ->
+            Thread {
+                probe(v)
+                act.runOnUiThread { if (dialog.isShowing) renderVideos() }
+            }.start()
+        }
+    }
+
+    private fun probe(v: VInfo) {
+        val headers = HashMap<String, String>().apply {
+            CookieManager.getInstance().getCookie(v.url)?.let { put("Cookie", it) }
+            put("User-Agent", web.settings.userAgentString)
+        }
+        try {
+            val c = URL(v.url).openConnection() as HttpURLConnection
+            c.requestMethod = "GET"; c.connectTimeout = 8000; c.readTimeout = 8000
+            headers.forEach { (k, x) -> c.setRequestProperty(k, x) }
+            c.setRequestProperty("Range", "bytes=0-0")
+            val cr = c.getHeaderField("Content-Range")
+            v.size = cr?.substringAfter('/')?.toLongOrNull() ?: c.getHeaderField("Content-Length")?.toLongOrNull() ?: -1
+            c.disconnect()
+        } catch (_: Exception) { }
+        try {
+            val r = MediaMetadataRetriever()
+            r.setDataSource(v.url, headers)
+            v.w = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
+            v.h = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
+            r.release()
+            if (v.h > 0 && v.quality.startsWith("جودة")) v.quality = "${min(v.w, v.h).let { std(it) }}p"
+        } catch (_: Exception) { }
+        v.done = true
+    }
+
+    private fun std(h: Int) = listOf(2160, 1440, 1080, 720, 576, 480, 360, 240).firstOrNull { h >= it * 0.85 } ?: h
+
+    private fun size(b: Long): String = when {
+        b >= 1L shl 30 -> String.format("%.2f GB", b / 1073741824.0)
+        b >= 1L shl 20 -> String.format("%.0f MB", b / 1048576.0)
+        else -> String.format("%.0f KB", b / 1024.0)
     }
 
     // ---------- تحميل الملفات ----------
