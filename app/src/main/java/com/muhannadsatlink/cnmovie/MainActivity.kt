@@ -144,7 +144,8 @@ class MainActivity : AppCompatActivity() {
         web.settings.userAgentString = cleanUa
 
         root = findViewById(android.R.id.content)
-        player = PlayerGestureLayer(this, web).apply { visibility = View.GONE }
+        player = PlayerGestureLayer(this, WebPlayerControl(web)).apply { visibility = View.GONE }
+        player.onPip = { enterPip() }
         root.addView(player, FrameLayout.LayoutParams(-1, -1))
         downloader = MediaDownloader(this, web)
         player.onDownload = { downloader.show() }
@@ -155,6 +156,7 @@ class MainActivity : AppCompatActivity() {
         // الصفحة تبلّغنا لما تجهز (بعد تخطي صفحة «حمّل التطبيق»)
         web.addJavascriptInterface(object {
             @JavascriptInterface fun ready() { runOnUiThread { hideSplash() } }
+            @JavascriptInterface fun toast(msg: String) { runOnUiThread { Toast.makeText(this@MainActivity, msg, Toast.LENGTH_SHORT).show() } }
             @JavascriptInterface fun subResult(id: String, kind: String, data: String) { downloader.onSubResult(id, kind, data) }
         }, "CNApp")
         // نلقط ردود الموقع من أول لحظة (قبل سكربتات الموقع)
@@ -458,6 +460,26 @@ class MainActivity : AppCompatActivity() {
             .setMessage(R.string.about_body)
             .setPositiveButton(R.string.close, null)
             .show()
+    }
+
+    // ---------- صورة داخل صورة ----------
+    private fun enterPip() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            try {
+                enterPictureInPictureMode(android.app.PictureInPictureParams.Builder()
+                    .setAspectRatio(android.util.Rational(16, 9)).build())
+            } catch (_: Throwable) { }
+        }
+    }
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        if (customView != null) enterPip()   // طلعت من التطبيق والفيلم شغّال: نافذة صغيرة
+    }
+
+    override fun onPictureInPictureModeChanged(isInPip: Boolean, newConfig: android.content.res.Configuration) {
+        super.onPictureInPictureModeChanged(isInPip, newConfig)
+        player.visibility = if (isInPip || customView == null) View.GONE else View.VISIBLE
     }
 
     override fun onSaveInstanceState(outState: Bundle) {

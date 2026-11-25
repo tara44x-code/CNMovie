@@ -259,15 +259,51 @@ window.CNSub = function (id, url, wantAr) {
     });
   }
 
+  // ---------- يكمل من وين وقفت ----------
+  function fmtT(s) { s = Math.floor(s); var h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60; return (h ? h + ':' + (m < 10 ? '0' : '') : '') + m + ':' + (x < 10 ? '0' : '') + x; }
+  function resume() {
+    var vids = document.querySelectorAll('video');
+    for (var i = 0; i < vids.length; i++) {
+      var v = vids[i];
+      if (v.__cnRes) continue;
+      v.__cnRes = true;
+      (function (v) {
+        var last = 0, restored = false;
+        function key() { return 'cnpos:' + location.pathname + ':' + Math.round(v.duration || 0); }
+        function tryRestore() {
+          if (restored || !v.duration || !isFinite(v.duration)) return;
+          restored = true;
+          var p = 0; try { p = parseFloat(localStorage.getItem(key())) || 0; } catch (e) {}
+          if (p > 30 && p < v.duration - 90 && v.currentTime < 10) {
+            v.currentTime = p;
+            try { CNApp.toast('كمّلنا من ' + fmtT(p)); } catch (e) {}
+          }
+        }
+        v.addEventListener('loadedmetadata', tryRestore);
+        v.addEventListener('playing', tryRestore);
+        v.addEventListener('timeupdate', function () {
+          if (!v.duration || !isFinite(v.duration) || Date.now() - last < 5000) return;
+          last = Date.now();
+          try {
+            if (v.currentTime > v.duration - 60) localStorage.removeItem(key());
+            else if (v.currentTime > 30) localStorage.setItem(key(), String(v.currentTime));
+          } catch (e) {}
+        });
+        tryRestore();
+      })(v);
+    }
+  }
+
   var timer = null;
   new MutationObserver(function () {
     if (timer) return;
-    timer = setTimeout(function () { timer = null; skip(); neon(); brand(); prune(); }, 300);
+    timer = setTimeout(function () { timer = null; skip(); neon(); brand(); prune(); resume(); }, 300);
   }).observe(document.documentElement, { childList: true, subtree: true });
   skip();
   neon();
   brand();
   prune();
+  resume();
 
   function firstVisible(sels) {
     for (var i = 0; i < sels.length; i++) {

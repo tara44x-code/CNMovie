@@ -11,8 +11,8 @@ android {
         applicationId = "com.muhannadsatlink.cnmovie"
         minSdk = 24
         targetSdk = 34
-        versionCode = 12
-        versionName = "2.1"
+        versionCode = 13
+        versionName = "2.2"
     }
 
     // مفتاح توقيع ثابت (اختياري): إذا وُجد app/release.jks وكلمة السر بالبيئة
@@ -47,4 +47,6 @@ dependencies {
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("androidx.core:core-splashscreen:1.0.1")
     implementation("androidx.webkit:webkit:1.11.0")
+    implementation("androidx.media3:media3-exoplayer:1.4.1")
+    implementation("androidx.media3:media3-ui:1.4.1")
 }

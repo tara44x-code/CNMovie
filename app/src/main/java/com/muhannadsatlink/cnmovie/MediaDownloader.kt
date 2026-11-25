@@ -269,18 +269,28 @@ class MediaDownloader(private val act: AppCompatActivity, private val web: WebVi
                             max = 100; progress = pct; progressDrawable = act.getDrawable(R.drawable.neon_progress)
                         }, LinearLayout.LayoutParams(-1, px(5)).apply { topMargin = px(6) })
                     }
+                    fun openExternal() {
+                        val uri = dm.getUriForDownloadedFile(id) ?: return
+                        try {
+                            act.startActivity(Intent.createChooser(Intent(Intent.ACTION_VIEW).setDataAndType(uri, dm.getMimeTypeForDownloadedFile(id)).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), "تشغيل بواسطة"))
+                        } catch (_: Throwable) { toast("ما لگينا تطبيق يفتح الملف") }
+                    }
                     card.setOnClickListener {
-                        if (st == DownloadManager.STATUS_SUCCESSFUL) {
-                            val uri = dm.getUriForDownloadedFile(id)
-                            if (uri != null) try {
-                                act.startActivity(Intent.createChooser(Intent(Intent.ACTION_VIEW).setDataAndType(uri, dm.getMimeTypeForDownloadedFile(id)).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), "تشغيل بواسطة"))
-                            } catch (_: Throwable) { toast("ما لگينا تطبيق يفتح الملف") }
-                        }
+                        if (st != DownloadManager.STATUS_SUCCESSFUL) return@setOnClickListener
+                        val uri = dm.getUriForDownloadedFile(id) ?: return@setOnClickListener
+                        val mime = dm.getMimeTypeForDownloadedFile(id) ?: ""
+                        if (mime.startsWith("video") || title.lowercase().matches(Regex(".*\\.(mp4|mkv|webm|m4v|mov)$"))) {
+                            val sub = findSubtitle(title.substringBeforeLast('.'))
+                            dialog.dismiss()
+                            PlayerActivity.start(act, uri, sub?.first, sub?.second, title)
+                        } else openExternal()
                     }
                     card.setOnLongClickListener {
-                        AlertDialog.Builder(act, R.style.Theme_CNMovie_Dialog).setMessage("حذف \"$title\"؟")
-                            .setPositiveButton("حذف") { _, _ -> dm.remove(id); refresh() }
-                            .setNegativeButton(R.string.close, null).show()
+                        AlertDialog.Builder(act, R.style.Theme_CNMovie_Dialog).setTitle(title)
+                            .setItems(arrayOf("تشغيل بتطبيق آخر", "حذف")) { _, w ->
+                                if (w == 0) openExternal()
+                                else { dm.remove(id); refresh() }
+                            }.show()
                         true
                     }
                     list.addView(card)
@@ -304,6 +314,31 @@ class MediaDownloader(private val act: AppCompatActivity, private val web: WebVi
         }
         handler.postDelayed(tick, 1000)
         toast("اضغط على الملف لتشغيله، ومطوّلاً لحذفه")
+    }
+
+    /** يدوّر على ملف ترجمة بنفس اسم الفيلم بمجلد CN.MOVIE */
+    private fun findSubtitle(base: String): Pair<Uri, String>? {
+        val names = listOf("srt", "vtt", "ass", "ssa").map { "$base.$it" }
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val col = MediaStore.Downloads.EXTERNAL_CONTENT_URI
+                act.contentResolver.query(col, arrayOf(MediaStore.Downloads._ID, MediaStore.Downloads.DISPLAY_NAME),
+                    "${MediaStore.Downloads.RELATIVE_PATH} LIKE ?", arrayOf("%CN.MOVIE%"),
+                    "${MediaStore.Downloads.DATE_ADDED} DESC")?.use { c ->
+                    while (c.moveToNext()) {
+                        val n = c.getString(1) ?: continue
+                        // MediaStore قد يضيف (1) للاسم المكرر
+                        val clean = n.replace(Regex(" \\(\\d+\\)(?=\\.[a-z]+$)"), "")
+                        if (names.any { it.equals(clean, true) }) return android.content.ContentUris.withAppendedId(col, c.getLong(0)) to n
+                    }
+                }
+            } else {
+                @Suppress("DEPRECATION")
+                val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "CN.MOVIE")
+                names.map { File(dir, it) }.firstOrNull { it.exists() }?.let { return Uri.fromFile(it) to it.name }
+            }
+        } catch (e: Throwable) { log("FINDSUB ERR ${e.message}") }
+        return null
     }
 
     private fun openFolder() {

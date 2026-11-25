@@ -37,7 +37,7 @@ import kotlin.math.min
 import kotlin.math.roundToInt
 
 @SuppressLint("ViewConstructor", "ClickableViewAccessibility")
-class PlayerGestureLayer(private val act: AppCompatActivity, private val web: WebView) : FrameLayout(act) {
+class PlayerGestureLayer(private val act: AppCompatActivity, var ctl: PlayerControl) : FrameLayout(act) {
 
     var target: View? = null
     var onDownload: (() -> Unit)? = null
@@ -58,6 +58,20 @@ class PlayerGestureLayer(private val act: AppCompatActivity, private val web: We
     private val aspectBtn = pill("ملاءمة")
     private val lockBtn = pill("قفل")
     private val dlBtn = pill("تحميل")
+    private val speedBtn = pill("1x")
+    private val sleepBtn = pill("مؤقت")
+    private val pipBtn = pill("نافذة")
+    var onPip: (() -> Unit)? = null
+    private val speeds = listOf(1f, 1.25f, 1.5f, 2f, 0.5f, 0.75f)
+    private var speedIdx = 0
+    private val sleeps = listOf(0, 15, 30, 45, 60, 90)
+    private var sleepIdx = 0
+    private var sleepAt = 0L
+    private val sleepRun = Runnable {
+        ctl.pause(); sleepIdx = 0; sleepBtn.text = "مؤقت"
+        showIndicator("مؤقت النوم: انتهى الوقت، تصبح على خير", -1)
+        removeCallbacks(hideIndicator); postDelayed(hideIndicator, 2500)
+    }
     private val unlockBtn = pill("فتح القفل")
 
     private val aspects = listOf("contain" to "ملاءمة", "cover" to "تكبير", "fill" to "تمديد")
@@ -118,6 +132,27 @@ class PlayerGestureLayer(private val act: AppCompatActivity, private val web: We
         topBar.addView(lockBtn, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { leftMargin = (10 * dp).toInt() })
         topBar.addView(dlBtn, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { leftMargin = (10 * dp).toInt() })
         dlBtn.setOnClickListener { onDownload?.invoke() }
+        listOf(speedBtn, sleepBtn, pipBtn).forEach {
+            topBar.addView(it, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { leftMargin = (10 * dp).toInt() })
+        }
+        speedBtn.setOnClickListener {
+            speedIdx = (speedIdx + 1) % speeds.size
+            val x = speeds[speedIdx]
+            ctl.setSpeed(x)
+            speedBtn.text = fmtSpeed(x)
+            showIndicator("السرعة ${fmtSpeed(x)}", -1); removeCallbacks(hideIndicator); postDelayed(hideIndicator, 800)
+            keepTop()
+        }
+        sleepBtn.setOnClickListener {
+            sleepIdx = (sleepIdx + 1) % sleeps.size
+            removeCallbacks(sleepRun)
+            val m = sleeps[sleepIdx]
+            if (m == 0) { sleepBtn.text = "مؤقت"; showIndicator("مؤقت النوم: مطفي", -1) }
+            else { postDelayed(sleepRun, m * 60_000L); sleepAt = SystemClock.uptimeMillis() + m * 60_000L; sleepBtn.text = "$m د"; showIndicator("يوقف بعد $m دقيقة", -1) }
+            removeCallbacks(hideIndicator); postDelayed(hideIndicator, 900)
+            keepTop()
+        }
+        pipBtn.setOnClickListener { onPip?.invoke() }
         addView(topBar, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.RIGHT).apply {
             topMargin = (18 * dp).toInt(); rightMargin = (22 * dp).toInt()
         })
@@ -131,8 +166,15 @@ class PlayerGestureLayer(private val act: AppCompatActivity, private val web: We
         unlockBtn.setOnClickListener { setLocked(false) }
     }
 
+    private fun fmtSpeed(x: Float) = if (x == x.toInt().toFloat()) "${x.toInt()}x" else "${x}x"
+
+    /** نرجّع السرعة المختارة بعد ما يتغيّر الفيديو */
+    fun reapplySpeed() { if (speedIdx != 0) ctl.setSpeed(speeds[speedIdx]) }
+
     fun reset() {
         aspectIdx = 0
+        aspectBtn.text = aspects[0].second
+        if (speedIdx != 0) postDelayed({ ctl.setSpeed(speeds[speedIdx]) }, 400)
         locked = false
         mode = 0
         streakUntil = 0
@@ -225,10 +267,7 @@ class PlayerGestureLayer(private val act: AppCompatActivity, private val web: We
                 startX = e.x
                 seekDelta = 0.0
                 seekCur = -1.0; seekDur = -1.0
-                web.evaluateJavascript(js("return v?(v.currentTime+','+v.duration):'';")) { r ->
-                    val p = r.trim('"').split(',')
-                    if (p.size == 2) { seekCur = p[0].toDoubleOrNull() ?: -1.0; seekDur = p[1].toDoubleOrNull() ?: -1.0 }
-                }
+                ctl.info { c, d -> seekCur = c; seekDur = d }
             }
             return
         }
@@ -267,29 +306,21 @@ class PlayerGestureLayer(private val act: AppCompatActivity, private val web: We
         r.text = if (dir < 0) "‎« ${streakTotal} ثانية" else "‎${streakTotal} ثانية »"
         r.alpha = 1f
         removeCallbacks(hideRipples); postDelayed(hideRipples, 800)
-        web.evaluateJavascript(js("if(!v)return 'none';v.currentTime=Math.max(0,Math.min((v.duration||1e9)-0.5,v.currentTime+(${dir * 10})));return 'ok';")) { res ->
-            if (!res.contains("ok")) {
-                // احتياط: أزرار الأسهم لمشغّلات لا نوصلها
-                val key = if (dir < 0) KeyEvent.KEYCODE_DPAD_LEFT else KeyEvent.KEYCODE_DPAD_RIGHT
-                repeat(2) {
-                    web.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, key))
-                    web.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_UP, key))
-                }
-            }
-        }
+        ctl.seekBy(dir * 10.0)
     }
 
     private fun applyScrub() {
         if (abs(seekDelta) < 1) return
         val d = seekDelta
-        web.evaluateJavascript(js("if(!v)return 'none';v.currentTime=Math.max(0,Math.min((v.duration||1e9)-0.5,v.currentTime+($d)));return 'ok';"), null)
+        ctl.seekBy(d)
     }
 
     private fun togglePlay() {
-        web.evaluateJavascript(js("if(!v)return 'none';if(v.paused){v.play();return 'play'}v.pause();return 'pause';")) { r ->
-            when {
-                r.contains("play") -> showIndicator("تشغيل", -1)
-                r.contains("pause") -> showIndicator("إيقاف مؤقت", -1)
+        ctl.togglePlay { r ->
+            when (r) {
+                true -> showIndicator("تشغيل", -1)
+                false -> showIndicator("إيقاف مؤقت", -1)
+                null -> {}
             }
             removeCallbacks(hideIndicator); postDelayed(hideIndicator, 700)
         }
@@ -299,8 +330,8 @@ class PlayerGestureLayer(private val act: AppCompatActivity, private val web: We
         aspectIdx = i
         val (fit, label) = aspects[i]
         aspectBtn.text = label
-        web.evaluateJavascript(js("if(!v)return 'none';v.style.setProperty('object-fit','$fit','important');return 'ok';")) { r ->
-            showIndicator(if (r.contains("ok")) label else "هذا المشغّل لا يدعم التكبير", -1)
+        ctl.setFit(fit) { ok ->
+            showIndicator(if (ok) label else "هذا المشغّل لا يدعم التكبير", -1)
             removeCallbacks(hideIndicator); postDelayed(hideIndicator, 800)
         }
     }
