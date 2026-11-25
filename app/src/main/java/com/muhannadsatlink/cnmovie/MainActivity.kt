@@ -40,7 +40,9 @@ import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.core.view.WindowCompat
+import android.webkit.WebResourceResponse
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 
@@ -76,9 +78,12 @@ class MainActivity : AppCompatActivity() {
     private var popupHolder: View? = null
     private var popupWeb: WebView? = null
     private lateinit var cleanUa: String
+    private lateinit var downloader: MediaDownloader
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
+        // شاشة بداية وحدة تبقى لحد ما تجهز الصفحة (حد أقصى 3 ثواني)
+        installSplashScreen().setKeepOnScreenCondition { !splashHidden }
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
@@ -99,8 +104,7 @@ class MainActivity : AppCompatActivity() {
             alpha = 0f; scaleX = 0.85f; scaleY = 0.85f
             animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(700).start()
         }
-        // إخفاء شاشة البداية بعد 4 ثواني كحد أقصى حتى لو الصفحة بطيئة
-        splash.postDelayed({ hideSplash() }, 4000)
+        splash.postDelayed({ hideSplash() }, 3000)
 
         // إعدادات الويب
         with(web.settings) {
@@ -123,6 +127,8 @@ class MainActivity : AppCompatActivity() {
         root = findViewById(android.R.id.content)
         player = PlayerGestureLayer(this, web).apply { visibility = View.GONE }
         root.addView(player, FrameLayout.LayoutParams(-1, -1))
+        downloader = MediaDownloader(this, web)
+        player.onDownload = { downloader.show() }
         // حفظ تسجيل الدخول (الكوكيز) بين مرات فتح التطبيق
         CookieManager.getInstance().setAcceptCookie(true)
         CookieManager.getInstance().setAcceptThirdPartyCookies(web, true)
@@ -141,6 +147,18 @@ class MainActivity : AppCompatActivity() {
                 return true
             }
 
+            // نراقب روابط الفيديو والترجمة حتى نگدر نحمّلها
+            override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
+                downloader.onRequest(request.url.toString())
+                return null
+            }
+
+            private var lastPath: String? = null
+            override fun doUpdateVisitedHistory(view: WebView, url: String?, isReload: Boolean) {
+                val path = url?.let { Uri.parse(it).path }
+                if (path != lastPath) { lastPath = path; downloader.clear() }
+            }
+
             override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
                 progress.visibility = View.VISIBLE
             }
@@ -154,7 +172,7 @@ class MainActivity : AppCompatActivity() {
                 view.evaluateJavascript(helperJs, null)
                 CookieManager.getInstance().flush()
                 // مهلة قصيرة حتى تنتخطى صفحة «حمّل التطبيق» قبل إخفاء شاشة البداية
-                splash.postDelayed({ hideSplash() }, 900)
+                splash.postDelayed({ hideSplash() }, 350)
             }
 
             override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
@@ -225,6 +243,7 @@ class MainActivity : AppCompatActivity() {
         tabs[1].setOnClickListener { selectTab(1); runHelper("cats") }
         tabs[2].setOnClickListener { selectTab(2); runHelper("search") }
         tabs[3].setOnClickListener { selectTab(3); runHelper("account") }
+        findViewById<ImageButton>(R.id.btnDownload).setOnClickListener { downloader.show() }
         findViewById<ImageButton>(R.id.btnRefresh).setOnClickListener { web.reload() }
         findViewById<ImageButton>(R.id.btnAbout).setOnClickListener { showAbout() }
         findViewById<Button>(R.id.btnRetry).setOnClickListener {
@@ -282,7 +301,7 @@ class MainActivity : AppCompatActivity() {
     private fun hideSplash() {
         if (splashHidden) return
         splashHidden = true
-        splash.animate().alpha(0f).setDuration(400).withEndAction { splash.visibility = View.GONE }.start()
+        splash.visibility = View.GONE
     }
 
     private fun exitFullscreen() {

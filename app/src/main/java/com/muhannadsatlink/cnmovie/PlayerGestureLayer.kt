@@ -40,6 +40,7 @@ import kotlin.math.roundToInt
 class PlayerGestureLayer(private val act: AppCompatActivity, private val web: WebView) : FrameLayout(act) {
 
     var target: View? = null
+    var onDownload: (() -> Unit)? = null
 
     private val dp = resources.displayMetrics.density
     private val cyan = Color.parseColor("#22E4FF")
@@ -56,6 +57,7 @@ class PlayerGestureLayer(private val act: AppCompatActivity, private val web: We
     private val topBar = LinearLayout(act)
     private val aspectBtn = pill("ملاءمة")
     private val lockBtn = pill("قفل")
+    private val dlBtn = pill("تحميل")
     private val unlockBtn = pill("فتح القفل")
 
     private val aspects = listOf("contain" to "ملاءمة", "cover" to "تكبير", "fill" to "تمديد")
@@ -114,6 +116,8 @@ class PlayerGestureLayer(private val act: AppCompatActivity, private val web: We
         topBar.visibility = GONE
         topBar.addView(aspectBtn)
         topBar.addView(lockBtn, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { leftMargin = (10 * dp).toInt() })
+        topBar.addView(dlBtn, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { leftMargin = (10 * dp).toInt() })
+        dlBtn.setOnClickListener { onDownload?.invoke() }
         addView(topBar, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.RIGHT).apply {
             topMargin = (18 * dp).toInt(); rightMargin = (22 * dp).toInt()
         })

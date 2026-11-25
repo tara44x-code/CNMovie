@@ -45,6 +45,14 @@
                 android:textSize="20sp" />
 
             <ImageButton
+                android:id="@+id/btnDownload"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="تحميل"
+                android:src="@drawable/ic_download" />
+
+            <ImageButton
                 android:id="@+id/btnRefresh"
                 android:layout_width="48dp"
                 android:layout_height="48dp"
@@ -228,6 +236,7 @@
         android:id="@+id/splash"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
+        android:visibility="gone"
         android:background="@color/bg"
         android:gravity="center"
         android:orientation="vertical">

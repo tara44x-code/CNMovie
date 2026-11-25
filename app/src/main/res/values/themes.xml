@@ -7,6 +7,12 @@
         <item name="colorAccent">@color/neon_cyan</item>
         <item name="android:windowLightStatusBar">false</item>
     </style>
+    <!-- شاشة البداية الموحّدة (بدل فتحتين) -->
+    <style name="Theme.CNMovie.Starting" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/bg</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/splash_logo</item>
+        <item name="postSplashScreenTheme">@style/Theme.CNMovie</item>
+    </style>
     <style name="Theme.CNMovie.Dialog" parent="Theme.AppCompat.Dialog.Alert">
         <item name="android:background">@color/surface</item>
         <item name="android:textColorPrimary">@color/text</item>
