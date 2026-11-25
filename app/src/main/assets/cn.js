@@ -68,43 +68,51 @@
   } catch (e) {}
 })();
 
-// ---------- قراءة الترجمة من المشغّل نفسه ----------
-window.CNSub = function (id, url) {
+// ---------- قراءة الترجمة من المشغّل نفسه (مع التأكد من اللغة) ----------
+window.CNSub = function (id, url, wantAr) {
   function send(fmt, data) { try { CNApp.subResult(id, fmt, data); } catch (e) {} }
-  function fromTracks() {
-    var vids = document.querySelectorAll('video');
+  function isAr(t) { var m = String(t).slice(0, 20000).match(/[؀-ۿ]/g); return !!m && m.length > 30; }
+  function ok(t) { return !wantAr || isAr(t); }
+  var B = (window.__cnMedia || {}).body || {};
+  function anyArabicBody() { var k = Object.keys(B); for (var i = k.length - 1; i >= 0; i--) if (isAr(B[k[i]])) return B[k[i]]; return null; }
+  function tracks() {
+    var vids = document.querySelectorAll('video'), best = null;
     for (var i = 0; i < vids.length; i++) {
-      var tt = vids[i].textTracks;
+      var tt = vids[i].textTracks, els = vids[i].querySelectorAll('track');
       for (var j = 0; j < tt.length; j++) {
-        var tr = tt[j], els = vids[i].querySelectorAll('track'), src = els[j] ? els[j].src : '';
-        if (url && src && src !== url) continue;
+        var tr = tt[j], src = els[j] ? els[j].src : '';
         if (tr.mode === 'disabled') tr.mode = 'hidden';
-        if (tr.cues && tr.cues.length) {
-          var out = [];
-          for (var c = 0; c < tr.cues.length; c++) out.push([tr.cues[c].startTime, tr.cues[c].endTime, tr.cues[c].text]);
-          return JSON.stringify(out);
-        }
+        if (!tr.cues || !tr.cues.length) continue;
+        var out = [], all = '';
+        for (var c = 0; c < tr.cues.length; c++) { out.push([tr.cues[c].startTime, tr.cues[c].endTime, tr.cues[c].text]); if (all.length < 20000) all += tr.cues[c].text; }
+        var exact = url && src === url;
+        if ((exact || !url || wantAr) && ok(all)) return JSON.stringify(out);
       }
     }
-    return null;
+    return best;
   }
-  var B = (window.__cnMedia || {}).body || {};
-  if (B[url]) { send('text', B[url]); return; }
-  var bk = Object.keys(B), fname = String(url).split('?')[0].split('/').pop();
-  for (var i = 0; i < bk.length; i++) if (fname && bk[i].indexOf(fname) !== -1) { send('text', B[bk[i]]); return; }
+  // 1) نفس الملف بالضبط اللي نزّله المشغّل
+  if (B[url] && ok(B[url])) { send('text', B[url]); return; }
+  // 2) نطلبه من داخل الصفحة
   fetch(url, { credentials: 'include' }).then(function (r) {
     if (!r.ok) throw new Error('HTTP ' + r.status);
     return r.text();
-  }).then(function (t) { send('text', t); }).catch(function (err) {
-    var cues = fromTracks();
-    var bk2 = Object.keys(B);
-    if (cues) send('cues', cues);
-    else if (bk2.length) send('text', B[bk2[bk2.length - 1]]);
-    else setTimeout(function () { var c2 = fromTracks(); send(c2 ? 'cues' : 'error', c2 || String(err)); }, 1500);
+  }).then(function (t) {
+    if (ok(t)) { send('text', t); return; }
+    throw new Error('not-arabic');
+  }).catch(function (err) {
+    // 3) أي ترجمة عربية نزّلها المشغّل، أو نص الترجمة المعروض
+    var ab = wantAr ? anyArabicBody() : null;
+    if (ab) { send('text', ab); return; }
+    var cues = tracks();
+    if (cues) { send('cues', cues); return; }
+    setTimeout(function () {
+      var ab2 = wantAr ? anyArabicBody() : null, c2 = tracks();
+      if (ab2) send('text', ab2); else if (c2) send('cues', c2); else send('error', String(err));
+    }, 1500);
   });
 };
 
-// CN.MOVIE helper — تطوير: مهند سات لنك
 (function () {
   if (window.CN) { window.CN.skip(); return; }
 

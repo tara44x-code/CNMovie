@@ -79,7 +79,8 @@ class MediaDownloader(private val act: AppCompatActivity, private val web: WebVi
     }
 
     // ---------- الترجمة عن طريق الصفحة نفسها ----------
-    private class PendingSub(val url: String, val format: String, val base: String)
+    private class PendingSub(val url: String, val format: String, val base: String, val wantAr: Boolean)
+    private fun hasArabic(c: List<Cue>) = c.take(400).sumOf { q -> q.text.count { it in '\u0600'..'\u06FF' } } > 30
     private val pending = HashMap<String, PendingSub>()
 
     fun onSubResult(id: String, kind: String, data: String) {
@@ -95,7 +96,11 @@ class MediaDownloader(private val act: AppCompatActivity, private val web: WebVi
                     }
                     else -> { log("SUB page-fail ${data.take(150)} ${p.url}"); parse(decode(fetch(p.url))) }
                 }
-                log("SUB ok via $kind cues=${cues.size}")
+                log("SUB ok via $kind cues=${cues.size} arabic=${hasArabic(cues)} want=${p.wantAr}")
+                if (p.wantAr && !hasArabic(cues)) {
+                    act.runOnUiThread { toast("الترجمة العربية بعدها ما وصلت. فعّل الترجمة العربية بالمشغّل، خليها تشتغل كم ثانية، وارجع حمّل.") }
+                    return@Thread
+                }
                 writeSub(cues, p.format, p.base)
             } catch (e: Throwable) {
                 log("SUB ERR ${e.javaClass.simpleName}: ${e.message} ${p.url}")
@@ -419,7 +424,7 @@ class MediaDownloader(private val act: AppCompatActivity, private val web: WebVi
                 c.setOnClickListener {
                     val base = "${title()} ${v.quality}"
                     downloadFile(v.url, "$base.${v.ext.lowercase()}")
-                    if (withSub.isChecked && arabic != null) downloadSub(arabic.url, subFormat, base)
+                    if (withSub.isChecked && arabic != null) downloadSub(arabic.url, subFormat, base, arabic.label.contains("عرب"))
                     dialog.dismiss()
                 }
                 videoBox.addView(c)
@@ -588,12 +593,13 @@ class MediaDownloader(private val act: AppCompatActivity, private val web: WebVi
         }
     }
 
-    private fun downloadSub(url: String, format: String, base: String) {
+    private fun downloadSub(url: String, format: String, base: String, arabicHint: Boolean? = null) {
         toast("جارِ تجهيز الترجمة…")
         val id = "s" + System.nanoTime()
-        synchronized(pending) { pending[id] = PendingSub(url, format, base) }
+        val wantAr = arabicHint ?: base.contains("عربي")
+        synchronized(pending) { pending[id] = PendingSub(url, format, base, wantAr) }
         val q = org.json.JSONObject.quote(url)
-        web.evaluateJavascript("window.CNSub ? (CNSub('$id', $q), 'ok') : 'no'") { r ->
+        web.evaluateJavascript("window.CNSub ? (CNSub('$id', $q, $wantAr), 'ok') : 'no'") { r ->
             if (!r.contains("ok")) onSubResult(id, "error", "no CNSub")
         }
         // احتياط إذا الصفحة ما ردّت
