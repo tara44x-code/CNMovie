@@ -42,8 +42,17 @@ class MediaDownloader(private val act: AppCompatActivity, private val web: WebVi
     /** روابط الفيديو والترجمة اللي مرّت بالشبكة أثناء التصفح */
     val seen: MutableSet<String> = Collections.synchronizedSet(LinkedHashSet())
 
+    /** طلبات API الموقع (منها نقرأ كل الجودات والترجمات) */
+    private val apiSeen: MutableSet<String> = Collections.synchronizedSet(LinkedHashSet())
+
     fun onRequest(url: String) {
         val p = url.substringBefore('?').lowercase()
+        if (p.contains("/api/") && (p.contains("shabakaty") || p.contains("earthlink"))) {
+            synchronized(apiSeen) {
+                apiSeen.remove(url); apiSeen.add(url)
+                while (apiSeen.size > 40) apiSeen.remove(apiSeen.first())
+            }
+        }
         if (VIDEO_EXT.any { p.endsWith(it) } || SUB_EXT.any { p.endsWith(it) }) {
             synchronized(seen) {
                 seen.remove(url); seen.add(url)
@@ -52,7 +61,7 @@ class MediaDownloader(private val act: AppCompatActivity, private val web: WebVi
         }
     }
 
-    fun clear() = seen.clear()
+    fun clear() { seen.clear(); apiSeen.clear() }
 
     // ---------- النافذة ----------
     fun show() {
@@ -75,12 +84,175 @@ class MediaDownloader(private val act: AppCompatActivity, private val web: WebVi
                     if (SUB_EXT.any { p.endsWith(it) }) addSub(subs, u, "") else addVideo(videos, u)
                 }
             }
+            toast("جارِ جمع الجودات والترجمات…")
+            val pageUrl = web.url ?: ""
+            lastReferer = pageUrl
+            val apis = synchronized(apiSeen) { apiSeen.toList().reversed() }
+            Thread {
+                val apiVideos = LinkedHashMap<String, String>()
+                val apiSubs = LinkedHashMap<String, String>()
+                try { fromApis(pageUrl, apis, apiVideos, apiSubs) } catch (_: Throwable) { }
+                act.runOnUiThread {
+                    // نتائج الـ API أولاً (أدق تسمية)، بعدها اللي التقطناه من المشغّل
+                    val v = LinkedHashMap<String, String>(); v.putAll(apiVideos); videos.forEach { (k, x) -> if (!v.containsKey(k)) v[k] = x }
+                    val s = LinkedHashMap<String, String>(); s.putAll(apiSubs); subs.forEach { (k, x) -> if (!s.containsKey(k)) s[k] = x }
+                    openDialog(v, s)
+                }
+            }.start()
+        }
+    }
+
+    private fun openDialog(videos: Map<String, String>, subs: Map<String, String>) {
+        run {
             try {
-                buildDialog(videos, subs.map { Sub(it.key, it.value) })
+                buildDialog(videos, subs.entries.mapIndexed { i, e -> Sub(e.key, e.value.ifBlank { "${i + 1}" }) })
             } catch (e: Throwable) {
                 CrashLog.save(act, e)
                 toast("صار خطأ بنافذة التحميل، انحفظ تقريره")
             }
+        }
+    }
+
+    // ---------- قراءة الجودات والترجمات من API الموقع ----------
+    private fun fromApis(pageUrl: String, apis: List<String>, videos: MutableMap<String, String>, subs: MutableMap<String, String>) {
+        val urls = LinkedHashSet<String>()
+        // معرّف الفيلم من رابط الصفحة، ونجرّب روابط API المعروفة لسينمانا
+        Regex("(\\d{4,})").findAll(pageUrl).map { it.value }.toList().takeLast(2).forEach { id ->
+            urls += "https://cinemana.shabakaty.com/api/android/transcoddedFiles/id/$id"
+            urls += "https://cinemana.shabakaty.com/api/android/translationFiles/id/$id"
+        }
+        urls.addAll(apis.take(15))
+        for (u in urls) {
+            try {
+                val body = String(fetch(u, 6000), Charsets.UTF_8).trim()
+                if (!body.startsWith("{") && !body.startsWith("[")) continue
+                walk(org.json.JSONTokener(body).nextValue(), videos, subs)
+            } catch (_: Throwable) { }
+        }
+    }
+
+    private fun walk(node: Any?, videos: MutableMap<String, String>, subs: MutableMap<String, String>) {
+        when (node) {
+            is org.json.JSONArray -> for (i in 0 until node.length()) walk(node.opt(i), videos, subs)
+            is JSONObject -> {
+                val keys = node.keys().asSequence().toList()
+                for (k in keys) {
+                    val v = node.opt(k)
+                    if (v is String && v.startsWith("http")) {
+                        val p = v.substringBefore('?').lowercase()
+                        if (VIDEO_EXT.any { p.endsWith(it) } && !p.endsWith(".m3u8")) {
+                            val q = listOf("resolution", "quality", "name", "label", "title").firstNotNullOfOrNull { f ->
+                                node.optString(f).takeIf { it.isNotBlank() && it.length < 20 && !it.startsWith("http") } }
+                            if (!videos.containsKey(v)) videos[v] = q?.let { if (it.matches(Regex("\\d+"))) "${it}p" else it } ?: ""
+                        } else if (SUB_EXT.any { p.endsWith(it) }) {
+                            val raw = listOf("name", "lang", "language", "label", "title").firstNotNullOfOrNull { f ->
+                                node.optString(f).takeIf { it.isNotBlank() && it.length < 30 && !it.startsWith("http") } } ?: ""
+                            val lab = when {
+                                raw.contains("عرب") || raw.lowercase().let { it == "ar" || it.startsWith("arab") } -> "عربي"
+                                raw.lowercase().let { it == "en" || it.startsWith("eng") } -> "إنجليزي"
+                                else -> raw
+                            }
+                            if (!subs.containsKey(v)) subs[v] = lab
+                        }
+                    } else if (v is JSONObject || v is org.json.JSONArray) walk(v, videos, subs)
+                }
+            }
+        }
+    }
+
+    // ---------- قائمة التحميلات داخل التطبيق ----------
+    fun showDownloads() {
+        val dm = act.getSystemService(AppCompatActivity.DOWNLOAD_SERVICE) as DownloadManager
+        val dp = act.resources.displayMetrics.density
+        fun px(v: Int) = (v * dp).toInt()
+        val list = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL; setPadding(px(18), px(6), px(18), px(10)); layoutDirection = View.LAYOUT_DIRECTION_RTL }
+        val scroll = ScrollView(act).apply { addView(list) }
+        val handler = android.os.Handler(android.os.Looper.getMainLooper())
+        lateinit var dialog: AlertDialog
+
+        fun refresh() {
+            list.removeAllViews()
+            val c = try { dm.query(DownloadManager.Query()) } catch (_: Throwable) { null }
+            var any = false
+            c?.use {
+                val rows = ArrayList<Array<Any>>()
+                while (it.moveToNext()) {
+                    rows += arrayOf(
+                        it.getLong(it.getColumnIndexOrThrow(DownloadManager.COLUMN_ID)),
+                        it.getString(it.getColumnIndexOrThrow(DownloadManager.COLUMN_TITLE)) ?: "",
+                        it.getInt(it.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS)),
+                        it.getLong(it.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR)),
+                        it.getLong(it.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES))
+                    )
+                }
+                rows.reversed().forEach { r ->
+                    any = true
+                    val id = r[0] as Long; val title = r[1] as String; val st = r[2] as Int
+                    val got = r[3] as Long; val tot = r[4] as Long
+                    val pct = if (tot > 0) (got * 100 / tot).toInt() else 0
+                    val status = when (st) {
+                        DownloadManager.STATUS_SUCCESSFUL -> "مكتمل • ${if (tot > 0) size(tot) else ""}"
+                        DownloadManager.STATUS_RUNNING -> "جارِ التحميل $pct% • ${size(got)} / ${if (tot > 0) size(tot) else "؟"}"
+                        DownloadManager.STATUS_PAUSED -> "متوقف مؤقتاً $pct%"
+                        DownloadManager.STATUS_PENDING -> "بالانتظار"
+                        else -> "فشل التحميل"
+                    }
+                    val card = LinearLayout(act).apply {
+                        orientation = LinearLayout.VERTICAL
+                        setPadding(px(14), px(10), px(14), px(10))
+                        background = GradientDrawable().apply { setColor(Color.parseColor("#0E0C1A")); cornerRadius = 14 * dp; setStroke(px(1), Color.parseColor("#2A2540")) }
+                        layoutParams = LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = px(8) }
+                    }
+                    card.addView(TextView(act).apply { text = title; setTextColor(Color.WHITE); textSize = 15f; setTypeface(typeface, Typeface.BOLD) })
+                    card.addView(TextView(act).apply { text = "\u200F$status"; setTextColor(if (st == DownloadManager.STATUS_FAILED) Color.parseColor("#FF7B93") else Color.parseColor("#A9A4C6")); textSize = 13f })
+                    if (st == DownloadManager.STATUS_RUNNING || st == DownloadManager.STATUS_PAUSED) {
+                        card.addView(android.widget.ProgressBar(act, null, android.R.attr.progressBarStyleHorizontal).apply {
+                            max = 100; progress = pct; progressDrawable = act.getDrawable(R.drawable.neon_progress)
+                        }, LinearLayout.LayoutParams(-1, px(5)).apply { topMargin = px(6) })
+                    }
+                    card.setOnClickListener {
+                        if (st == DownloadManager.STATUS_SUCCESSFUL) {
+                            val uri = dm.getUriForDownloadedFile(id)
+                            if (uri != null) try {
+                                act.startActivity(Intent.createChooser(Intent(Intent.ACTION_VIEW).setDataAndType(uri, dm.getMimeTypeForDownloadedFile(id)).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), "تشغيل بواسطة"))
+                            } catch (_: Throwable) { toast("ما لگينا تطبيق يفتح الملف") }
+                        }
+                    }
+                    card.setOnLongClickListener {
+                        AlertDialog.Builder(act, R.style.Theme_CNMovie_Dialog).setMessage("حذف \"$title\"؟")
+                            .setPositiveButton("حذف") { _, _ -> dm.remove(id); refresh() }
+                            .setNegativeButton(R.string.close, null).show()
+                        true
+                    }
+                    list.addView(card)
+                }
+            }
+            if (!any) list.addView(TextView(act).apply {
+                text = "ماكو تحميلات بعد. شغّل فيلم واضغط زر التحميل."; setTextColor(Color.WHITE); textSize = 15f; setPadding(0, px(12), 0, px(12))
+            })
+        }
+
+        refresh()
+        dialog = AlertDialog.Builder(act, R.style.Theme_CNMovie_Dialog)
+            .setTitle("التحميلات")
+            .setView(scroll)
+            .setNegativeButton(R.string.close, null)
+            .setNeutralButton("فتح المجلد") { _, _ -> openFolder() }
+            .show()
+        dialog.window?.decorView?.setBackgroundColor(Color.parseColor("#12101F"))
+        val tick = object : Runnable {
+            override fun run() { if (dialog.isShowing) { try { refresh() } catch (_: Throwable) { }; handler.postDelayed(this, 1000) } }
+        }
+        handler.postDelayed(tick, 1000)
+        toast("اضغط على الملف لتشغيله، ومطوّلاً لحذفه")
+    }
+
+    private fun openFolder() {
+        try {
+            val uri = Uri.parse("content://com.android.externalstorage.documents/document/primary%3ADownload%2FCN.MOVIE")
+            act.startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri, "vnd.android.document/directory").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
+        } catch (_: Throwable) {
+            try { act.startActivity(Intent(DownloadManager.ACTION_VIEW_DOWNLOADS)) } catch (_: Throwable) { }
         }
     }
 
@@ -121,7 +293,7 @@ class MediaDownloader(private val act: AppCompatActivity, private val web: WebVi
         // الترجمة العربية أولاً
         val ordered = subs.sortedBy { if (it.label.contains("عرب") || it.label.lowercase().startsWith("ar")) 0 else 1 }
         val arabic = ordered.firstOrNull()
-        val infos = videos.map { (u, q) -> VInfo(u, q).also { it.ext = ext(u, "mp4").uppercase() } }
+        val infos = videos.entries.mapIndexed { i, (u, q) -> VInfo(u, q.ifBlank { "جودة ${i + 1}" }).also { it.ext = ext(u, "mp4").uppercase() } }
 
         val root = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL; setPadding(px(18), px(6), px(18), px(10)); layoutDirection = View.LAYOUT_DIRECTION_RTL }
         val scroll = ScrollView(act).apply { addView(root) }
@@ -179,7 +351,8 @@ class MediaDownloader(private val act: AppCompatActivity, private val web: WebVi
         }
         fun renderVideos() {
             videoBox.removeAllViews()
-            val sorted = if (infos.all { it.done }) infos.sortedByDescending { it.h } else infos
+            fun rank(v: VInfo) = if (v.h > 0) min(v.w, v.h) else (Regex("(\\d{3,4})").find(v.quality)?.value?.toIntOrNull() ?: 0)
+            val sorted = infos.sortedByDescending { rank(it) }
             sorted.forEach { v ->
                 val c = card()
                 c.addView(TextView(act).apply {
@@ -246,6 +419,7 @@ class MediaDownloader(private val act: AppCompatActivity, private val web: WebVi
         val headers = HashMap<String, String>().apply {
             CookieManager.getInstance().getCookie(v.url)?.let { put("Cookie", it) }
             put("User-Agent", web.settings.userAgentString)
+            lastReferer?.let { put("Referer", it) }
         }
         try {
             val c = URL(v.url).openConnection() as HttpURLConnection
@@ -368,9 +542,12 @@ class MediaDownloader(private val act: AppCompatActivity, private val web: WebVi
         }.start()
     }
 
-    private fun fetch(url: String): ByteArray {
+    private var lastReferer: String? = null
+
+    private fun fetch(url: String, timeout: Int = 15000): ByteArray {
         val c = URL(url).openConnection() as HttpURLConnection
-        c.connectTimeout = 15000; c.readTimeout = 20000
+        c.connectTimeout = timeout; c.readTimeout = timeout + 5000
+        lastReferer?.let { c.setRequestProperty("Referer", it) }
         CookieManager.getInstance().getCookie(url)?.let { c.setRequestProperty("Cookie", it) }
         c.setRequestProperty("User-Agent", web.settings.userAgentString)
         return c.inputStream.use { it.readBytes() }.also { c.disconnect() }

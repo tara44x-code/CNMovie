@@ -262,7 +262,7 @@ class MainActivity : AppCompatActivity() {
         tabs[0].setOnClickListener { selectTab(0); web.loadUrl(HOME_URL) }
         tabs[1].setOnClickListener { selectTab(1); runHelper("cats") }
         tabs[2].setOnClickListener { selectTab(2); runHelper("search") }
-        tabs[3].setOnClickListener { selectTab(3); runHelper("account") }
+        tabs[3].setOnClickListener { downloader.showDownloads() }
         findViewById<ImageButton>(R.id.btnDownload).setOnClickListener { downloader.show() }
         findViewById<ImageButton>(R.id.btnRefresh).setOnClickListener { web.reload() }
         findViewById<ImageButton>(R.id.btnAbout).setOnClickListener { showAbout() }
