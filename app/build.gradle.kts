@@ -11,15 +11,28 @@ android {
         applicationId = "com.muhannadsatlink.cnmovie"
         minSdk = 24
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1"
+    }
+
+    // مفتاح توقيع ثابت (اختياري): إذا وُجد app/release.jks وكلمة السر بالبيئة
+    val ks = file("release.jks")
+    val ksPass = System.getenv("KEYSTORE_PASSWORD")
+    signingConfigs {
+        if (ks.exists() && !ksPass.isNullOrEmpty()) {
+            create("release") {
+                storeFile = ks
+                storePassword = ksPass
+                keyAlias = System.getenv("KEY_ALIAS") ?: "cnmovie"
+                keyPassword = ksPass
+            }
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
-            // يوقَّع بمفتاح الـ debug حتى يتثبت مباشرة؛ بدّله بمفتاحك قبل النشر
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
         }
     }
     compileOptions {

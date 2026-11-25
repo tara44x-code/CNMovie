@@ -27,6 +27,8 @@ import android.webkit.WebViewClient
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.ImageButton
+import android.view.inputmethod.InputMethodManager
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
@@ -54,6 +56,8 @@ class MainActivity : AppCompatActivity() {
     private var customCallback: WebChromeClient.CustomViewCallback? = null
     private var lastBack = 0L
     private var splashHidden = false
+    private val helperJs by lazy { assets.open("cn.js").bufferedReader(Charsets.UTF_8).use { it.readText() } }
+    private lateinit var tabs: List<LinearLayout>
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -112,10 +116,16 @@ class MainActivity : AppCompatActivity() {
                 progress.visibility = View.VISIBLE
             }
 
+            override fun onPageCommitVisible(view: WebView, url: String?) {
+                view.evaluateJavascript(helperJs, null)
+            }
+
             override fun onPageFinished(view: WebView, url: String?) {
                 progress.visibility = View.GONE
+                view.evaluateJavascript(helperJs, null)
                 CookieManager.getInstance().flush()
-                hideSplash()
+                // مهلة قصيرة حتى تنتخطى صفحة «حمّل التطبيق» قبل إخفاء شاشة البداية
+                splash.postDelayed({ hideSplash() }, 900)
             }
 
             override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
@@ -167,7 +177,13 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        findViewById<ImageButton>(R.id.btnHome).setOnClickListener { web.loadUrl(HOME_URL) }
+        // الشريط السفلي
+        tabs = listOf(R.id.tabHome, R.id.tabCats, R.id.tabSearch, R.id.tabAccount).map { findViewById(it) }
+        selectTab(0)
+        tabs[0].setOnClickListener { selectTab(0); web.loadUrl(HOME_URL) }
+        tabs[1].setOnClickListener { selectTab(1); runHelper("cats") }
+        tabs[2].setOnClickListener { selectTab(2); runHelper("search") }
+        tabs[3].setOnClickListener { selectTab(3); runHelper("account") }
         findViewById<ImageButton>(R.id.btnRefresh).setOnClickListener { web.reload() }
         findViewById<ImageButton>(R.id.btnAbout).setOnClickListener { showAbout() }
         findViewById<Button>(R.id.btnRetry).setOnClickListener {
@@ -190,6 +206,35 @@ class MainActivity : AppCompatActivity() {
         })
 
         if (savedInstanceState != null) web.restoreState(savedInstanceState) else web.loadUrl(HOME_URL)
+    }
+
+    private fun selectTab(index: Int) {
+        val on = Color.parseColor("#22E4FF")
+        val off = Color.parseColor("#8C88A8")
+        tabs.forEachIndexed { i, tab ->
+            val c = if (i == index) on else off
+            (tab.getChildAt(0) as ImageView).setColorFilter(c)
+            (tab.getChildAt(1) as TextView).apply {
+                setTextColor(c)
+                setShadowLayer(if (i == index) 14f else 0f, 0f, 0f, on)
+            }
+        }
+    }
+
+    private fun runHelper(action: String) {
+        web.evaluateJavascript("$helperJs\n;(window.CN ? CN.$action() : 'no')") { result ->
+            if (result?.contains("ok") == true) {
+                if (action == "search") {
+                    web.requestFocus()
+                    web.postDelayed({
+                        (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager)
+                            .showSoftInput(web, InputMethodManager.SHOW_IMPLICIT)
+                    }, 450)
+                }
+            } else {
+                Toast.makeText(this, R.string.tab_wait, Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     private fun hideSplash() {

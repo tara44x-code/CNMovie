@@ -6,8 +6,13 @@
     <string name="offline_body">تأكد من اتصالك بالإنترنت ثم حاول مرة أخرى</string>
     <string name="retry">إعادة المحاولة</string>
     <string name="about_title">حول التطبيق</string>
-    <string name="about_body">CN.MOVIE — الإصدار 1.0\n\nتطوير: مهند سات لنك\n\nتطبيق غير رسمي لتصفّح محتوى سينمانا. جميع الأفلام والحسابات تابعة لخدماتها الأصلية.</string>
+    <string name="about_body">CN.MOVIE — الإصدار 1.1\n\nتطوير: مهند سات لنك</string>
     <string name="close">إغلاق</string>
     <string name="exit_hint">اضغط رجوع مرة ثانية للخروج</string>
     <string name="download_started">بدأ التحميل…</string>
+    <string name="tab_home">الرئيسية</string>
+    <string name="tab_cats">الأقسام</string>
+    <string name="tab_search">بحث</string>
+    <string name="tab_account">الحساب</string>
+    <string name="tab_wait">انتظر تحميل الصفحة ثم حاول مرة ثانية</string>
 </resources>
