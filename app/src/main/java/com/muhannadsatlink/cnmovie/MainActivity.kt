@@ -21,6 +21,7 @@ import android.text.style.ForegroundColorSpan
 import android.view.View
 import android.view.WindowManager
 import android.webkit.CookieManager
+import android.webkit.JavascriptInterface
 import android.webkit.URLUtil
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
@@ -104,7 +105,7 @@ class MainActivity : AppCompatActivity() {
             alpha = 0f; scaleX = 0.85f; scaleY = 0.85f
             animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(700).start()
         }
-        splash.postDelayed({ hideSplash() }, 3000)
+        splash.postDelayed({ hideSplash() }, 4500)
 
         // إعدادات الويب
         with(web.settings) {
@@ -133,6 +134,10 @@ class MainActivity : AppCompatActivity() {
         CookieManager.getInstance().setAcceptCookie(true)
         CookieManager.getInstance().setAcceptThirdPartyCookies(web, true)
         web.setBackgroundColor(Color.parseColor("#07060F"))
+        // الصفحة تبلّغنا لما تجهز (بعد تخطي صفحة «حمّل التطبيق»)
+        web.addJavascriptInterface(object {
+            @JavascriptInterface fun ready() { runOnUiThread { hideSplash() } }
+        }, "CNApp")
 
         web.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
@@ -172,7 +177,7 @@ class MainActivity : AppCompatActivity() {
                 view.evaluateJavascript(helperJs, null)
                 CookieManager.getInstance().flush()
                 // مهلة قصيرة حتى تنتخطى صفحة «حمّل التطبيق» قبل إخفاء شاشة البداية
-                splash.postDelayed({ hideSplash() }, 350)
+
             }
 
             override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
