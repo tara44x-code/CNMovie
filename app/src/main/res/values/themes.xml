@@ -9,8 +9,8 @@
     </style>
     <!-- شاشة البداية الموحّدة (بدل فتحتين) -->
     <style name="Theme.CNMovie.Starting" parent="Theme.SplashScreen">
-        <item name="windowSplashScreenBackground">@color/bg</item>
-        <item name="windowSplashScreenAnimatedIcon">@drawable/splash_logo</item>
+        <item name="windowSplashScreenBackground">#000000</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/transparent</item>
         <item name="postSplashScreenTheme">@style/Theme.CNMovie</item>
     </style>
     <style name="Theme.CNMovie.Dialog" parent="Theme.AppCompat.Dialog.Alert">

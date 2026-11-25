@@ -9,7 +9,6 @@ import android.content.Intent
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
-import android.media.MediaMetadataRetriever
 import android.view.Gravity
 import android.view.View
 import android.widget.CheckBox
@@ -76,7 +75,12 @@ class MediaDownloader(private val act: AppCompatActivity, private val web: WebVi
                     if (SUB_EXT.any { p.endsWith(it) }) addSub(subs, u, "") else addVideo(videos, u)
                 }
             }
-            buildDialog(videos, subs.map { Sub(it.key, it.value) })
+            try {
+                buildDialog(videos, subs.map { Sub(it.key, it.value) })
+            } catch (e: Throwable) {
+                CrashLog.save(act, e)
+                toast("صار خطأ بنافذة التحميل، انحفظ تقريره")
+            }
         }
     }
 
@@ -230,8 +234,10 @@ class MediaDownloader(private val act: AppCompatActivity, private val web: WebVi
         // فحص الحجم والدقة بالخلفية
         infos.forEach { v ->
             Thread {
-                probe(v)
-                act.runOnUiThread { if (dialog.isShowing) renderVideos() }
+                try { probe(v) } catch (_: Throwable) { v.done = true }
+                act.runOnUiThread {
+                    try { if (dialog.isShowing) renderVideos() } catch (e: Throwable) { CrashLog.save(act, e) }
+                }
             }.start()
         }
     }
@@ -251,14 +257,67 @@ class MediaDownloader(private val act: AppCompatActivity, private val web: WebVi
             c.disconnect()
         } catch (_: Exception) { }
         try {
-            val r = MediaMetadataRetriever()
-            r.setDataSource(v.url, headers)
-            v.w = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
-            v.h = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
-            r.release()
-            if (v.h > 0 && v.quality.startsWith("جودة")) v.quality = "${min(v.w, v.h).let { std(it) }}p"
-        } catch (_: Exception) { }
+            mp4Dims(v.url, headers)?.let { (w, h) ->
+                v.w = w; v.h = h
+                if (v.quality.startsWith("جودة")) v.quality = "${std(min(w, h))}p"
+            }
+        } catch (_: Throwable) { }
         v.done = true
+    }
+
+    // ---------- قراءة دقة MP4 بدون مكتبات: نمشي على صناديق الملف لحد moov ونقرأ tkhd ----------
+    private fun rangeGet(url: String, headers: Map<String, String>, start: Long, len: Int): ByteArray {
+        val c = URL(url).openConnection() as HttpURLConnection
+        c.connectTimeout = 8000; c.readTimeout = 10000
+        headers.forEach { (k, x) -> c.setRequestProperty(k, x) }
+        c.setRequestProperty("Range", "bytes=$start-${start + len - 1}")
+        try {
+            if (c.responseCode != 206 && start > 0) return ByteArray(0)
+            val out = java.io.ByteArrayOutputStream()
+            c.inputStream.use { inp ->
+                val buf = ByteArray(16384)
+                while (out.size() < len) {
+                    val n = inp.read(buf, 0, minOf(buf.size, len - out.size()))
+                    if (n < 0) break
+                    out.write(buf, 0, n)
+                }
+            }
+            return out.toByteArray()
+        } finally { c.disconnect() }
+    }
+
+    private fun u32(b: ByteArray, i: Int): Long =
+        ((b[i].toLong() and 0xFF) shl 24) or ((b[i + 1].toLong() and 0xFF) shl 16) or ((b[i + 2].toLong() and 0xFF) shl 8) or (b[i + 3].toLong() and 0xFF)
+
+    private fun mp4Dims(url: String, headers: Map<String, String>): Pair<Int, Int>? {
+        var off = 0L
+        repeat(12) {
+            val hdr = rangeGet(url, headers, off, 16)
+            if (hdr.size < 8) return null
+            var size = u32(hdr, 0)
+            val type = String(hdr, 4, 4, Charsets.ISO_8859_1)
+            if (size == 1L && hdr.size >= 16) size = (u32(hdr, 8) shl 32) or u32(hdr, 12)
+            if (size < 8) return null
+            if (type == "moov") {
+                val data = rangeGet(url, headers, off, minOf(size, 262144L).toInt())
+                var i = 4
+                while (i + 4 <= data.size) {
+                    if (data[i] == 't'.code.toByte() && data[i + 1] == 'k'.code.toByte() && data[i + 2] == 'h'.code.toByte() && data[i + 3] == 'd'.code.toByte()) {
+                        val end = i - 4 + u32(data, i - 4).toInt()
+                        if (end in (i + 8)..data.size) {
+                            val w = (u32(data, end - 8) ushr 16).toInt()
+                            val h = (u32(data, end - 4) ushr 16).toInt()
+                            if (w > 0 && h > 0) return w to h
+                        }
+                    }
+                    i++
+                }
+                return null
+            }
+            if (type !in listOf("ftyp", "free", "skip", "mdat", "wide", "uuid", "pdin", "styp", "sidx", "moof")) return null
+            off += size
+        }
+        return null
     }
 
     private fun std(h: Int) = listOf(2160, 1440, 1080, 720, 576, 480, 360, 240).firstOrNull { h >= it * 0.85 } ?: h

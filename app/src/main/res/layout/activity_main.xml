@@ -231,51 +231,35 @@
             android:textStyle="bold" />
     </LinearLayout>
 
-    <!-- شاشة البداية -->
-    <LinearLayout
+    <!-- شاشة البداية: شعار GIF متحرك -->
+    <FrameLayout
         android:id="@+id/splash"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:visibility="gone"
-        android:background="@color/bg"
-        android:gravity="center"
-        android:orientation="vertical">
+        android:background="#000000"
+        android:clickable="true">
 
         <ImageView
             android:id="@+id/splashLogo"
-            android:layout_width="150dp"
-            android:layout_height="150dp"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:layout_gravity="center"
+            android:adjustViewBounds="true"
             android:contentDescription="@string/app_name"
+            android:scaleType="fitCenter"
             android:src="@drawable/logo_cn" />
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="18dp"
-            android:fontFamily="sans-serif-black"
-            android:letterSpacing="0.15"
-            android:shadowColor="@color/neon_pink"
-            android:shadowRadius="18"
-            android:text="CN.MOVIE"
-            android:textColor="@color/text"
-            android:textSize="28sp" />
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:text="@string/loading"
-            android:textColor="@color/neon_cyan"
-            android:textSize="14sp" />
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="80dp"
+            android:layout_gravity="bottom|center_horizontal"
+            android:layout_marginBottom="36dp"
+            android:shadowColor="@color/neon_cyan"
+            android:shadowRadius="12"
             android:text="@string/developer"
-            android:textColor="@color/muted"
-            android:textSize="13sp" />
-    </LinearLayout>
+            android:textColor="@color/text"
+            android:textSize="14sp" />
+    </FrameLayout>
 
     <!-- حاوية فيديو ملء الشاشة -->
     <FrameLayout

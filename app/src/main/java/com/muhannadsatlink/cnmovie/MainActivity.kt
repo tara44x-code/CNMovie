@@ -7,6 +7,9 @@ import android.app.DownloadManager
 import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.graphics.Bitmap
+import android.graphics.ImageDecoder
+import android.graphics.drawable.AnimatedImageDrawable
+import android.os.SystemClock
 import android.graphics.Color
 import android.net.Uri
 import android.os.Build
@@ -72,6 +75,10 @@ class MainActivity : AppCompatActivity() {
     private var customCallback: WebChromeClient.CustomViewCallback? = null
     private var lastBack = 0L
     private var splashHidden = false
+    private var pageReady = false
+    private val introStart = SystemClock.uptimeMillis()
+    private val INTRO_MS = 7000L   // مدة شعار البداية
+    private val INTRO_MAX_MS = 11000L
     private val helperJs by lazy { assets.open("cn.js").bufferedReader(Charsets.UTF_8).use { it.readText() } }
     private lateinit var tabs: List<LinearLayout>
     private lateinit var player: PlayerGestureLayer
@@ -84,8 +91,9 @@ class MainActivity : AppCompatActivity() {
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         // شاشة بداية وحدة تبقى لحد ما تجهز الصفحة (حد أقصى 3 ثواني)
-        installSplashScreen().setKeepOnScreenCondition { !splashHidden }
+        installSplashScreen()
         super.onCreate(savedInstanceState)
+        CrashLog.install(applicationContext)
         setContentView(R.layout.activity_main)
 
         web = findViewById(R.id.web)
@@ -100,12 +108,19 @@ class MainActivity : AppCompatActivity() {
         brand.setSpan(ForegroundColorSpan(Color.parseColor("#FF2BD6")), 2, 8, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
         findViewById<TextView>(R.id.brand).text = brand
 
-        // نبضة توهّج لشعار البداية
-        findViewById<View>(R.id.splashLogo).apply {
-            alpha = 0f; scaleX = 0.85f; scaleY = 0.85f
-            animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(700).start()
+        // شعار البداية المتحرك (GIF) والموقع يحمّل وراه
+        val logo = findViewById<ImageView>(R.id.splashLogo)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            try {
+                val d = ImageDecoder.decodeDrawable(ImageDecoder.createSource(resources, R.raw.intro))
+                logo.setImageDrawable(d)
+                (d as? AnimatedImageDrawable)?.start()
+            } catch (_: Throwable) { }
         }
-        splash.postDelayed({ hideSplash() }, 4500)
+        logo.alpha = 0f
+        logo.animate().alpha(1f).setDuration(500).start()
+        splash.postDelayed({ maybeHideSplash() }, INTRO_MS)
+        splash.postDelayed({ maybeHideSplash() }, INTRO_MAX_MS)
 
         // إعدادات الويب
         with(web.settings) {
@@ -272,6 +287,7 @@ class MainActivity : AppCompatActivity() {
         })
 
         if (savedInstanceState != null) web.restoreState(savedInstanceState) else web.loadUrl(HOME_URL)
+        splash.postDelayed({ CrashLog.showIfAny(this) }, INTRO_MS + 800)
     }
 
     private fun selectTab(index: Int) {
@@ -303,10 +319,19 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // تُستدعى لما الصفحة تجهز
     private fun hideSplash() {
+        pageReady = true
+        maybeHideSplash()
+    }
+
+    private fun maybeHideSplash() {
         if (splashHidden) return
+        val t = SystemClock.uptimeMillis() - introStart
+        if (t < INTRO_MS) return
+        if (!pageReady && t < INTRO_MAX_MS) return
         splashHidden = true
-        splash.visibility = View.GONE
+        splash.animate().alpha(0f).setDuration(450).withEndAction { splash.visibility = View.GONE }.start()
     }
 
     private fun exitFullscreen() {
