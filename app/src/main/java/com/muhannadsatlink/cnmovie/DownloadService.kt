@@ -229,7 +229,7 @@ class DownloadService : Service() {
     }
 
     private fun mime(name: String) = when (name.substringAfterLast('.').lowercase()) {
-        "mkv" -> "video/x-matroska"; "webm" -> "video/webm"; "srt", "vtt", "ass" -> "text/plain"; else -> "video/mp4"
+        "mkv" -> "video/x-matroska"; "webm" -> "video/webm"; "srt", "vtt", "ass", "ssa" -> "application/octet-stream"; else -> "video/mp4"
     }
 
     private fun openOut(t: DlTask, append: Boolean): OutputStream {

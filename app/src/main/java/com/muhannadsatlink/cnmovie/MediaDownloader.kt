@@ -387,11 +387,22 @@ class MediaDownloader(private val act: AppCompatActivity, private val web: WebVi
     }
 
     // ---------- قائمة التحميلات داخل التطبيق ----------
+    var onPickVideo: (() -> Unit)? = null
+
     fun showDownloads() {
         val dp = act.resources.displayMetrics.density
         fun px(v: Int) = (v * dp).toInt()
         val list = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL; setPadding(px(18), px(6), px(18), px(10)); layoutDirection = View.LAYOUT_DIRECTION_RTL }
-        val scroll = ScrollView(act).apply { addView(list) }
+        val outer = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL }
+        outer.addView(TextView(act).apply {
+            text = "▶  فتح فيديو من الجهاز بمشغّل CN"
+            setTextColor(Color.WHITE); textSize = 15f; setTypeface(typeface, Typeface.BOLD); gravity = Gravity.CENTER
+            setPadding(px(12), px(12), px(12), px(12))
+            background = GradientDrawable().apply { cornerRadius = 14 * dp; colors = intArrayOf(Color.parseColor("#FF2BD6"), Color.parseColor("#A23BFF")); orientation = GradientDrawable.Orientation.LEFT_RIGHT }
+            setOnClickListener { onPickVideo?.invoke() }
+        }, LinearLayout.LayoutParams(-1, -2).apply { setMargins(px(18), px(8), px(18), px(6)) })
+        outer.addView(list)
+        val scroll = ScrollView(act).apply { addView(outer) }
         val handler = android.os.Handler(android.os.Looper.getMainLooper())
         lateinit var dialog: AlertDialog
         var sig = ""
@@ -811,7 +822,8 @@ class MediaDownloader(private val act: AppCompatActivity, private val web: WebVi
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val values = ContentValues().apply {
                 put(MediaStore.Downloads.DISPLAY_NAME, name)
-                put(MediaStore.Downloads.MIME_TYPE, "text/plain")
+                // نوع عام حتى أندرويد ما يضيف .txt لآخر الاسم
+                put(MediaStore.Downloads.MIME_TYPE, "application/octet-stream")
                 put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/CN.MOVIE")
             }
             val uri = act.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: error("no uri")
