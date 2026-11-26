@@ -77,6 +77,18 @@ class MediaDownloader(private val act: AppCompatActivity, private val web: WebVi
         synchronized(diag) { diag.forEach { append(it.take(300)).append('\n') } }
         append(CrashLog.notes(act))
     }
+    /** يجمع التقرير (ويّا الطلبات الفاشلة من الصفحة) وينسخه */
+    fun copyDiagWithFails() {
+        web.evaluateJavascript("(function(){var M=window.__cnMedia||{};return JSON.stringify({f:M.fail||[],l:M.log||[],hook:!!window.__cnHook})})()") { raw ->
+            try {
+                val j = JSONObject(org.json.JSONTokener(raw).nextValue() as String)
+                log("HOOK=${j.optBoolean("hook")} ORIGINAL_MODE=${Prefs.get(act, "original", false)}")
+                j.optJSONArray("f")?.let { a -> for (i in 0 until a.length()) log("FAIL ${a.optString(i)}") }
+            } catch (e: Throwable) { log("DIAG ${e.message}") }
+            copyDiag()
+        }
+    }
+
     private fun copyDiag() {
         val cm = act.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
         cm.setPrimaryClip(android.content.ClipData.newPlainText("CN.MOVIE diag", diagText()))
@@ -667,7 +679,7 @@ class MediaDownloader(private val act: AppCompatActivity, private val web: WebVi
             setTextColor(Color.parseColor("#8C88A8")); textSize = 13f; gravity = Gravity.CENTER
             setPadding(0, px(14), 0, px(4))
             paintFlags = paintFlags or android.graphics.Paint.UNDERLINE_TEXT_FLAG
-            setOnClickListener { copyDiag() }
+            setOnClickListener { copyDiagWithFails() }
         })
         dialog = AlertDialog.Builder(act, R.style.Theme_CNMovie_Dialog)
             .setTitle("تحميل")

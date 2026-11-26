@@ -35,6 +35,10 @@ object SettingsDialog {
             root.addView(TextView(a).apply { text = sub; textSize = 12f; setTextColor(Color.parseColor("#A9A4C6")); setPadding(0, 0, 0, px(6)) })
         }
 
+        sw("وضع الموقع الأصلي", "يطفي ثيم النيون واسم CN وكل تعديلات التطبيق على الموقع (للتجربة). يحتاج تعيد فتح التطبيق", "original", false) { _, v ->
+            Prefs.set(a, "original", v)
+            Toast.makeText(a, "سكّر التطبيق من الخلفية وافتحه حتى يتطبّق", Toast.LENGTH_LONG).show()
+        }
         sw("التحميل بالواي فاي فقط", "التحميلات ما تستهلك بيانات الموبايل", Prefs.WIFI_ONLY, false)
         sw("قفل التطبيق", "بالبصمة أو رمز الجهاز عند الفتح", Prefs.LOCK, false) { b, v ->
             if (!v) { Prefs.set(a, Prefs.LOCK, false); return@sw }
@@ -45,6 +49,11 @@ object SettingsDialog {
             AppLock.prompt(a, { Prefs.set(a, Prefs.LOCK, true); Toast.makeText(a, "تم تفعيل القفل", Toast.LENGTH_SHORT).show() }, { b.isChecked = false })
         }
 
+        root.addView(TextView(a).apply {
+            text = "نسخ تقرير التشخيص"; textSize = 14f; setTextColor(Color.parseColor("#22E4FF")); gravity = Gravity.CENTER
+            setPadding(0, px(14), 0, 0)
+            setOnClickListener { (a as? MainActivity)?.copyDiag() }
+        })
         root.addView(TextView(a).apply {
             text = "فحص التحديثات"; textSize = 16f; setTextColor(Color.WHITE); gravity = Gravity.CENTER
             setTypeface(typeface, Typeface.BOLD)

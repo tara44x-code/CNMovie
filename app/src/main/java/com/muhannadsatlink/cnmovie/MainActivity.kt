@@ -165,7 +165,7 @@ class MainActivity : AppCompatActivity() {
         }, "CNApp")
         // نلقط ردود الموقع من أول لحظة (قبل سكربتات الموقع)
         try {
-            if (androidx.webkit.WebViewFeature.isFeatureSupported(androidx.webkit.WebViewFeature.DOCUMENT_START_SCRIPT)) {
+            if (!original && androidx.webkit.WebViewFeature.isFeatureSupported(androidx.webkit.WebViewFeature.DOCUMENT_START_SCRIPT)) {
                 androidx.webkit.WebViewCompat.addDocumentStartJavaScript(web,
                     assets.open("hook.js").bufferedReader(Charsets.UTF_8).use { it.readText() }, setOf("*"))
             }
@@ -201,12 +201,12 @@ class MainActivity : AppCompatActivity() {
             }
 
             override fun onPageCommitVisible(view: WebView, url: String?) {
-                view.evaluateJavascript(helperJs, null)
+                if (!original) view.evaluateJavascript(helperJs, null)
             }
 
             override fun onPageFinished(view: WebView, url: String?) {
                 progress.visibility = View.GONE
-                view.evaluateJavascript(helperJs, null)
+                if (!original) view.evaluateJavascript(helperJs, null) else hideSplash()
                 CookieManager.getInstance().flush()
                 // مهلة قصيرة حتى تنتخطى صفحة «حمّل التطبيق» قبل إخفاء شاشة البداية
 
@@ -453,6 +453,9 @@ class MainActivity : AppCompatActivity() {
             .setPositiveButton(R.string.close, null)
             .show()
     }
+
+    fun copyDiag() = downloader.copyDiagWithFails()
+    private val original get() = Prefs.get(this, "original", false)
 
     // ---------- فتح فيديو من الجهاز بمشغّل CN ----------
     private val pickVideo = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocument()) { uri ->

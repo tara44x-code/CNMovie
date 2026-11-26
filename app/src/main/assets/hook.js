@@ -2,7 +2,8 @@
 (function () {
   if (window.__cnHook) return;
   window.__cnHook = true;
-  var M = window.__cnMedia = { v: {}, s: {}, log: [], body: {} };
+  var M = window.__cnMedia = { v: {}, s: {}, log: [], body: {}, fail: [] };
+  function failed(u, st) { if (M.fail.length < 30) M.fail.push(st + ' ' + String(u).slice(0, 200)); }
   var RX = /https?:\/\/[^"'\s\\<>]+?\.(mp4|mkv|webm|m4v|srt|vtt|ass|ssa)(\?[^"'\s\\<>]*)?/gi;
   function add(u, label) {
     var p = u.split('?')[0].toLowerCase();
@@ -58,16 +59,19 @@
     if (of) window.fetch = function () {
       var u = arguments[0] && (arguments[0].url || arguments[0]);
       return of.apply(window, arguments).then(function (r) {
+        if (!r.ok) failed(u, 'FETCH ' + r.status);
         try { var ct = (r.headers.get('content-type') || ''); if (/json|text|javascript|octet|subrip|vtt/.test(ct) || /\.(srt|vtt|ass|ssa)(\?|$)/i.test(String(u))) r.clone().text().then(function (t) { scanText(t, u); }); } catch (e) {}
         return r;
-      });
+      }, function (err) { failed(u, 'FETCH ERR ' + err); throw err; });
     };
   } catch (e) {}
   try {
     var oo = XMLHttpRequest.prototype.open;
     XMLHttpRequest.prototype.open = function (m, u) {
       this.__cnUrl = u;
+      this.addEventListener('error', function () { failed(this.__cnUrl, 'XHR ERR'); });
       this.addEventListener('load', function () {
+        if (this.status >= 400) failed(this.__cnUrl, 'XHR ' + this.status);
         try {
           var rt = this.responseType;
           if (rt === '' || rt === 'text') scanText(this.responseText, this.__cnUrl);
