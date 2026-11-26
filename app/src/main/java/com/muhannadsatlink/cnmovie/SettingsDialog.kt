@@ -35,8 +35,6 @@ object SettingsDialog {
             root.addView(TextView(a).apply { text = sub; textSize = 12f; setTextColor(Color.parseColor("#A9A4C6")); setPadding(0, 0, 0, px(6)) })
         }
 
-        sw("تخطي المقدمة تلقائياً", "يضغط «تخطي المقدمة» بنفسه أول ما يطلع", Prefs.AUTO_SKIP, true)
-        sw("الحلقة التالية تلقائياً", "لما تخلص الحلقة تبدي اللي بعدها خلال 5 ثواني", Prefs.AUTO_NEXT, true)
         sw("التحميل بالواي فاي فقط", "التحميلات ما تستهلك بيانات الموبايل", Prefs.WIFI_ONLY, false)
         sw("قفل التطبيق", "بالبصمة أو رمز الجهاز عند الفتح", Prefs.LOCK, false) { b, v ->
             if (!v) { Prefs.set(a, Prefs.LOCK, false); return@sw }

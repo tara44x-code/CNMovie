@@ -241,8 +241,61 @@ class MediaDownloader(private val act: AppCompatActivity, private val web: WebVi
                 putString("Referer", page); putString("User-Agent", ua); if (cookie.isNotEmpty()) putString("Cookie", cookie)
             })
         }
-        try { act.startActivity(Intent.createChooser(i, "فتح الفيديو بواسطة")) }
-        catch (_: Throwable) { toast("ما لگينا تطبيق مشغّل فيديو") }
+        pickPlayer(i)
+    }
+
+    /** قائمة بكل تطبيقات الفيديو المنصّبة، حتى اللي ما تعلن دعمها لروابط النت */
+    private fun pickPlayer(base: Intent) {
+        val pm = act.packageManager
+        val probes = listOf(
+            Intent(Intent.ACTION_VIEW).setDataAndType(base.data, "video/*"),
+            Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse("file:///sdcard/a.mp4"), "video/*"),
+            Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse("content://x/a.mp4"), "video/mp4"),
+            Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse("https://x/a.m3u8"), "application/x-mpegURL")
+        )
+        val apps = LinkedHashMap<String, android.content.pm.ResolveInfo>()
+        probes.forEach { p ->
+            try {
+                @Suppress("DEPRECATION")
+                pm.queryIntentActivities(p, 0).forEach { r ->
+                    val pkg = r.activityInfo.packageName
+                    if (pkg != act.packageName && !apps.containsKey(pkg)) apps[pkg] = r
+                }
+            } catch (_: Throwable) { }
+        }
+        if (apps.isEmpty()) {
+            try { act.startActivity(Intent.createChooser(base, "فتح الفيديو بواسطة")) } catch (_: Throwable) { toast("ما لگينا تطبيق مشغّل فيديو") }
+            return
+        }
+        val list = apps.values.sortedBy { it.loadLabel(pm).toString() }
+        val dp = act.resources.displayMetrics.density
+        val box = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL; setPadding((12 * dp).toInt(), (6 * dp).toInt(), (12 * dp).toInt(), (6 * dp).toInt()); layoutDirection = View.LAYOUT_DIRECTION_RTL }
+        lateinit var d: AlertDialog
+        list.forEach { r ->
+            val row = LinearLayout(act).apply {
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding((8 * dp).toInt(), (10 * dp).toInt(), (8 * dp).toInt(), (10 * dp).toInt())
+                isClickable = true
+                setOnClickListener {
+                    d.dismiss()
+                    val i = Intent(base).setClassName(r.activityInfo.packageName, r.activityInfo.name).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    try { act.startActivity(i) } catch (_: Throwable) {
+                        try { act.startActivity(Intent(base).setPackage(r.activityInfo.packageName)) } catch (_: Throwable) { toast("هذا التطبيق ما قبل يفتح الرابط") }
+                    }
+                }
+            }
+            row.addView(android.widget.ImageView(act).apply { setImageDrawable(r.loadIcon(pm)) }, LinearLayout.LayoutParams((40 * dp).toInt(), (40 * dp).toInt()))
+            row.addView(TextView(act).apply {
+                text = r.loadLabel(pm); setTextColor(Color.WHITE); textSize = 16f; setPadding((14 * dp).toInt(), 0, 0, 0)
+            })
+            box.addView(row)
+        }
+        d = AlertDialog.Builder(act, R.style.Theme_CNMovie_Dialog)
+            .setTitle("فتح الفيديو بواسطة")
+            .setView(ScrollView(act).apply { addView(box) })
+            .setNegativeButton(R.string.close, null)
+            .show()
+        d.window?.decorView?.setBackgroundColor(Color.parseColor("#12101F"))
     }
 
     // ---------- قراءة الجودات والترجمات من API الموقع ----------

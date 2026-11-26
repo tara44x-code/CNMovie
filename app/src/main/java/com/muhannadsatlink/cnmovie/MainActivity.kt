@@ -152,7 +152,6 @@ class MainActivity : AppCompatActivity() {
         root.addView(player, FrameLayout.LayoutParams(-1, -1))
         downloader = MediaDownloader(this, web)
         player.onDownload = { downloader.show() }
-        player.addPill("مشاركة") { downloader.share() }
         // حفظ تسجيل الدخول (الكوكيز) بين مرات فتح التطبيق
         CookieManager.getInstance().setAcceptCookie(true)
         CookieManager.getInstance().setAcceptThirdPartyCookies(web, true)
