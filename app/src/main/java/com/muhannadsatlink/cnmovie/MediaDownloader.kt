@@ -437,7 +437,7 @@ class MediaDownloader(private val act: AppCompatActivity, private val web: WebVi
                 card.setOnClickListener {
                     when (t.status) {
                         "done" -> if (uri != null) {
-                            val sub = findSubtitle(t.name.substringBeforeLast('.'))
+                            val sub = SubFinder.find(act, t.name)
                             dialog.dismiss()
                             PlayerActivity.start(act, uri, sub?.first, sub?.second, t.name)
                         }

@@ -72,15 +72,54 @@ class PlayerActivity : AppCompatActivity() {
         }
         applySubStyle()
         root.addView(view, FrameLayout.LayoutParams(-1, -1))
+        // شريط التقديم بألوان النيون
+        view.findViewById<androidx.media3.ui.DefaultTimeBar>(androidx.media3.ui.R.id.exo_progress)?.apply {
+            setPlayedColor(Color.parseColor("#FF2BD6")); setScrubberColor(Color.parseColor("#22E4FF"))
+            setBufferedColor(Color.parseColor("#5522E4FF")); setUnplayedColor(Color.parseColor("#33FFFFFF"))
+        }
+        // اسم الفيلم وزر رجوع
+        val dp = resources.displayMetrics.density
+        val head = android.widget.LinearLayout(this).apply {
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            setPadding((12 * dp).toInt(), (14 * dp).toInt(), (12 * dp).toInt(), (14 * dp).toInt())
+            background = android.graphics.drawable.GradientDrawable(android.graphics.drawable.GradientDrawable.Orientation.TOP_BOTTOM,
+                intArrayOf(Color.parseColor("#CC000000"), Color.TRANSPARENT))
+        }
+        head.addView(android.widget.ImageButton(this).apply {
+            setImageResource(androidx.appcompat.R.drawable.abc_ic_ab_back_material)
+            setColorFilter(Color.WHITE); background = null; contentDescription = "رجوع"
+            setOnClickListener { finish() }
+        }, android.widget.LinearLayout.LayoutParams((44 * dp).toInt(), (44 * dp).toInt()))
+        head.addView(android.widget.TextView(this).apply {
+            text = intent.getStringExtra("title")?.substringBeforeLast('.') ?: ""
+            setTextColor(Color.WHITE); textSize = 16f; maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            setShadowLayer(12f, 0f, 0f, Color.parseColor("#22E4FF"))
+            setPadding((8 * dp).toInt(), 0, 0, 0)
+        }, android.widget.LinearLayout.LayoutParams(0, -2, 1f))
+        root.addView(head, FrameLayout.LayoutParams(-1, -2, android.view.Gravity.TOP))
+        // يطلع ويختفي ويّا أزرار المشغّل
+        view.setControllerVisibilityListener(PlayerView.ControllerVisibilityListener { v -> head.visibility = v })
 
         layer = PlayerGestureLayer(this, ExoControl())
         layer.target = view
         layer.onPip = { enterPip() }
-        if (intent.getStringExtra("sub") != null) layer.addPill("الترجمة") { subDialog() }
+        layer.addPill("الترجمة") {
+            if (intent.getStringExtra("sub") != null) subDialog()
+            else Toast.makeText(this, "ماكو ترجمة لهذا الفيلم — اضغط «ملف ترجمة» واختارها", Toast.LENGTH_LONG).show()
+        }
+        layer.addPill("ملف ترجمة") { pickSub.launch(arrayOf("*/*")) }
+        boostBtn = layer.addPill("الصوت 100%") { cycleBoost() }
         root.addView(layer, FrameLayout.LayoutParams(-1, -1))
         setContentView(root)
 
         val video = intent.data ?: run { finish(); return }
+        // إذا ما انطت ترجمة، ندوّر على ملف بنفس اسم الفيلم
+        if (intent.getStringExtra("sub") == null) {
+            SubFinder.find(this, intent.getStringExtra("title") ?: "")?.let { (u, n) ->
+                intent.putExtra("sub", u.toString()); intent.putExtra("subName", n)
+            }
+        }
         val item = MediaItem.Builder().setUri(video)
         intent.getStringExtra("sub")?.let { s ->
             val name = intent.getStringExtra("subName")?.lowercase() ?: ""
@@ -91,7 +130,7 @@ class PlayerActivity : AppCompatActivity() {
             }
             item.setSubtitleConfigurations(listOf(
                 MediaItem.SubtitleConfiguration.Builder(Uri.parse(s))
-                    .setMimeType(mime).setLanguage("ar").setLabel("عربي")
+                    .setMimeType(mime).setLanguage("ar").setLabel(name.substringBeforeLast('.'))
                     .setSelectionFlags(C.SELECTION_FLAG_DEFAULT).build()))
         }
         player.setMediaItem(item.build())
@@ -102,6 +141,37 @@ class PlayerActivity : AppCompatActivity() {
             Toast.makeText(this, "كمّلنا من وين وقفت", Toast.LENGTH_SHORT).show()
         }
         player.playWhenReady = true
+    }
+
+    // ---------- تقوية الصوت ----------
+    private var boostBtn: android.widget.TextView? = null
+    private var enhancer: android.media.audiofx.LoudnessEnhancer? = null
+    private val boosts = listOf(0, 600, 1200, 1800) // ميلي ديسيبل
+    private val boostLabels = listOf("100%", "130%", "160%", "200%")
+    private var boostIdx = 0
+    private fun cycleBoost() {
+        boostIdx = (boostIdx + 1) % boosts.size
+        try {
+            if (enhancer == null) enhancer = android.media.audiofx.LoudnessEnhancer(player.audioSessionId)
+            enhancer!!.setTargetGain(boosts[boostIdx]); enhancer!!.enabled = boostIdx > 0
+            boostBtn?.text = "الصوت ${boostLabels[boostIdx]}"
+            Toast.makeText(this, "الصوت ${boostLabels[boostIdx]}", Toast.LENGTH_SHORT).show()
+        } catch (e: Throwable) { Toast.makeText(this, "تقوية الصوت غير مدعومة بهذا الجهاز", Toast.LENGTH_SHORT).show() }
+    }
+
+    // ---------- تحميل ملف ترجمة من الجهاز ----------
+    private val pickSub = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@registerForActivityResult
+        try { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: Throwable) { }
+        val name = (contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+            if (c.moveToFirst()) c.getString(0) else null } ?: "sub.srt")
+        if (!name.lowercase().matches(Regex(".*\\.(srt|vtt|ass|ssa)$"))) {
+            Toast.makeText(this, "اختار ملف ترجمة (SRT أو VTT أو ASS)", Toast.LENGTH_SHORT).show(); return@registerForActivityResult
+        }
+        intent.putExtra("sub", uri.toString()); intent.putExtra("subName", name)
+        subDelay = 0
+        applyDelay()
+        Toast.makeText(this, "انضافت الترجمة: $name", Toast.LENGTH_SHORT).show()
     }
 
     // ---------- تحكم بالترجمة: الحجم واللون والخلفية والتوقيت ----------
@@ -250,6 +320,7 @@ class PlayerActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        try { enhancer?.release() } catch (_: Throwable) { }
         layer.restoreBrightness()
         player.release()
     }
