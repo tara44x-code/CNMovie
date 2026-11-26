@@ -152,6 +152,7 @@ class MainActivity : AppCompatActivity() {
         root.addView(player, FrameLayout.LayoutParams(-1, -1))
         downloader = MediaDownloader(this, web)
         player.onDownload = { downloader.show() }
+        player.addPill("مشاركة") { downloader.share() }
         // حفظ تسجيل الدخول (الكوكيز) بين مرات فتح التطبيق
         CookieManager.getInstance().setAcceptCookie(true)
         CookieManager.getInstance().setAcceptThirdPartyCookies(web, true)
@@ -280,6 +281,7 @@ class MainActivity : AppCompatActivity() {
         tabs[2].setOnClickListener { selectTab(2); runHelper("search") }
         tabs[3].setOnClickListener { downloader.showDownloads() }
         findViewById<ImageButton>(R.id.btnDownload).setOnClickListener { downloader.show() }
+        findViewById<ImageButton>(R.id.btnShare).setOnClickListener { downloader.share() }
         findViewById<ImageButton>(R.id.btnRefresh).setOnClickListener { web.reload() }
         findViewById<ImageButton>(R.id.btnAbout).setOnClickListener { SettingsDialog.show(this) }
         findViewById<Button>(R.id.btnRetry).setOnClickListener {

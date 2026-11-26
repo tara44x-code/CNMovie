@@ -176,6 +176,75 @@ class MediaDownloader(private val act: AppCompatActivity, private val web: WebVi
         }
     }
 
+    // ---------- فتح الفيديو بتطبيق ثاني (MX / VLC / غيرها) ----------
+    fun share() {
+        web.evaluateJavascript(SCAN_JS) { raw ->
+            var video: String? = null
+            var sub: String? = null
+            try {
+                val json = JSONObject(org.json.JSONTokener(raw).nextValue() as String)
+                val v = json.getJSONArray("v")
+                for (i in 0 until v.length()) {
+                    val u = v.getJSONObject(i).optString("src")
+                    val p = u.substringBefore('?').lowercase()
+                    if (u.startsWith("http") && !p.endsWith(".m3u8")) { video = u; break }
+                }
+                val s = json.getJSONArray("s")
+                for (i in 0 until s.length()) {
+                    val o = s.getJSONObject(i)
+                    if (o.optString("label").contains("عرب") || o.optString("label").lowercase().startsWith("ar")) { sub = o.optString("src"); break }
+                }
+            } catch (e: Exception) { log("SHARE scan ${e.message}") }
+            if (video == null) synchronized(seen) {
+                video = seen.reversed().firstOrNull { u -> val p = u.substringBefore('?').lowercase(); VIDEO_EXT.any { p.endsWith(it) } && !p.endsWith(".m3u8") }
+            }
+            val url = video
+            if (url == null) { toast("شغّل الفيلم أولاً، بعدين اضغط مشاركة"); return@evaluateJavascript }
+            val subUrl = sub?.takeIf { it.startsWith("http") }
+            val items = arrayOf("فتح بتطبيق مشغّل آخر", "مشاركة رابط الفيديو", "نسخ رابط الفيديو")
+            AlertDialog.Builder(act, R.style.Theme_CNMovie_Dialog)
+                .setTitle("مشاركة الفيديو")
+                .setItems(items) { _, w ->
+                    when (w) {
+                        0 -> openWith(url, subUrl)
+                        1 -> act.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain")
+                            .putExtra(Intent.EXTRA_SUBJECT, title()).putExtra(Intent.EXTRA_TEXT, url), "مشاركة الرابط"))
+                        else -> {
+                            val cm = act.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                            cm.setPrimaryClip(android.content.ClipData.newPlainText("video", url)); toast("انتسخ الرابط")
+                        }
+                    }
+                }
+                .setNegativeButton(R.string.close, null)
+                .show().window?.decorView?.setBackgroundColor(Color.parseColor("#12101F"))
+        }
+    }
+
+    private fun openWith(url: String, sub: String?) {
+        val page = web.url ?: ""
+        val cookie = CookieManager.getInstance().getCookie(url) ?: ""
+        val ua = web.settings.userAgentString
+        val i = Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse(url), "video/*").apply {
+            putExtra("title", title())
+            // MX Player
+            putExtra("headers", arrayOf("Referer", page, "User-Agent", ua, "Cookie", cookie))
+            putExtra("secure_uri", true)
+            if (sub != null) {
+                putExtra("subs", arrayOf<android.os.Parcelable>(Uri.parse(sub)))
+                putExtra("subs.name", arrayOf("عربي"))
+                putExtra("subs.enable", arrayOf<android.os.Parcelable>(Uri.parse(sub)))
+                // VLC
+                putExtra("subtitles_location", sub)
+            }
+            // متصفحات ومشغّلات ثانية
+            putExtra(android.provider.Browser.EXTRA_HEADERS, android.os.Bundle().apply {
+                putString("Referer", page); putString("User-Agent", ua); if (cookie.isNotEmpty()) putString("Cookie", cookie)
+            })
+        }
+        try { act.startActivity(Intent.createChooser(i, "فتح الفيديو بواسطة")) }
+        catch (_: Throwable) { toast("ما لگينا تطبيق مشغّل فيديو") }
+    }
+
     // ---------- قراءة الجودات والترجمات من API الموقع ----------
     private fun fromApis(pageUrl: String, apis: List<String>, videos: MutableMap<String, String>, subs: MutableMap<String, String>) {
         val urls = LinkedHashSet<String>()

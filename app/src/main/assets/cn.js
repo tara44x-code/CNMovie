@@ -320,7 +320,6 @@ window.CNSub = function (id, url, wantAr) {
       }
     }
   }
-  setInterval(autoSkip, 1000);
 
   var timer = null;
   new MutationObserver(function () {
@@ -380,4 +379,32 @@ window.CNSub = function (id, url, wantAr) {
       return 'no';
     }
   };
+})();
+
+// ---------- تخطي المقدمة تلقائياً (يشتغل بكل إطار، ومنها إطار المشغّل) ----------
+(function () {
+  if (window.__cnSkipLoop) return;
+  window.__cnSkipLoop = true;
+  function opt() { try { return (window.top.__cnOpt || window.__cnOpt || { skip: true }); } catch (e) { return window.__cnOpt || { skip: true }; } }
+  function norm(t) { return String(t || '').replace(/[ً-ٟـ]/g, '').replace(/\s+/g, ' ').trim(); }
+  function isSkip(t) { t = norm(t); return t.length < 30 && ((t.indexOf('تخطي') !== -1 || t.indexOf('تجاوز') !== -1) && t.indexOf('مقدم') !== -1 || /skip\s*(the\s*)?intro/i.test(t) || /skip\s*opening/i.test(t)); }
+  function vis(e) { return !!(e && e.getClientRects().length && getComputedStyle(e).visibility !== 'hidden' && getComputedStyle(e).opacity !== '0'); }
+  var last = 0;
+  setInterval(function () {
+    if (!opt().skip || Date.now() - last < 15000 || !document.body) return;
+    var els = document.querySelectorAll('button,a,[role=button],div,span');
+    for (var i = 0; i < els.length; i++) {
+      var e = els[i];
+      if (e.childElementCount > 3) continue;
+      if (!isSkip(e.innerText || e.textContent) || !vis(e)) continue;
+      var tg = e.closest('button,a,[role=button]') || e;
+      last = Date.now();
+      ['pointerdown', 'mousedown', 'pointerup', 'mouseup'].forEach(function (n) {
+        try { tg.dispatchEvent(new MouseEvent(n, { bubbles: true, cancelable: true, view: window })); } catch (x) {}
+      });
+      tg.click();
+      try { CNApp.toast('تخطينا المقدمة'); } catch (x) {}
+      return;
+    }
+  }, 1000);
 })();
