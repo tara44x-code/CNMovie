@@ -312,10 +312,29 @@ window.CNSub = function (id, url, wantAr) {
     }
   }
 
+  // ---------- إخفاء تنبيه «هناك خطأ ما» المنبثق (خطأ من الموقع نفسه) ----------
+  function hideSiteToast() {
+    var els = document.querySelectorAll('div,span,p,h1,h2,h3,h4');
+    for (var i = 0; i < els.length; i++) {
+      var e = els[i];
+      if (e.childElementCount > 1 || txt(e) !== 'هناك خطأ ما') continue;
+      // نخفي بس التنبيه الطاير (position fixed/absolute)، مو صفحة الخطأ الكاملة
+      var n = e;
+      for (var up = 0; up < 6 && n && n !== document.body; up++) {
+        var pos = getComputedStyle(n).position;
+        if (pos === 'fixed' || (pos === 'absolute' && n.getBoundingClientRect().height < window.innerHeight * 0.5)) {
+          n.style.setProperty('display', 'none', 'important');
+          break;
+        }
+        n = n.parentElement;
+      }
+    }
+  }
+
   var timer = null;
   new MutationObserver(function () {
     if (timer) return;
-    timer = setTimeout(function () { timer = null; skip(); neon(); brand(); prune(); resume(); }, 300);
+    timer = setTimeout(function () { timer = null; skip(); neon(); brand(); prune(); resume(); hideSiteToast(); }, 150);
   }).observe(document.documentElement, { childList: true, subtree: true });
   skip();
   neon();
