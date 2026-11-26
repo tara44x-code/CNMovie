@@ -388,85 +388,76 @@ class MediaDownloader(private val act: AppCompatActivity, private val web: WebVi
 
     // ---------- قائمة التحميلات داخل التطبيق ----------
     fun showDownloads() {
-        val dm = act.getSystemService(AppCompatActivity.DOWNLOAD_SERVICE) as DownloadManager
         val dp = act.resources.displayMetrics.density
         fun px(v: Int) = (v * dp).toInt()
         val list = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL; setPadding(px(18), px(6), px(18), px(10)); layoutDirection = View.LAYOUT_DIRECTION_RTL }
         val scroll = ScrollView(act).apply { addView(list) }
         val handler = android.os.Handler(android.os.Looper.getMainLooper())
         lateinit var dialog: AlertDialog
-
-        Thread { try { DownloadNamer.fixAll(act) } catch (_: Throwable) { } }.start()
+        var sig = ""
 
         fun refresh() {
+            val tasks = DlStore.all(act)
+            val now = tasks.joinToString("|") { "${it.id}${it.status}${it.done / (512 * 1024)}" }
+            if (now == sig) return
+            sig = now
             list.removeAllViews()
-            val c = try { dm.query(DownloadManager.Query()) } catch (_: Throwable) { null }
-            var any = false
-            c?.use {
-                val rows = ArrayList<Array<Any>>()
-                while (it.moveToNext()) {
-                    rows += arrayOf(
-                        it.getLong(it.getColumnIndexOrThrow(DownloadManager.COLUMN_ID)),
-                        it.getString(it.getColumnIndexOrThrow(DownloadManager.COLUMN_TITLE)) ?: "",
-                        it.getInt(it.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS)),
-                        it.getLong(it.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR)),
-                        it.getLong(it.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES))
-                    )
+            tasks.forEach { t ->
+                val pct = if (t.total > 0) (t.done * 100 / t.total).toInt() else 0
+                val sz = DownloadService.formatSize(t.done) + " / " + (if (t.total > 0) DownloadService.formatSize(t.total) else "؟")
+                val status = when (t.status) {
+                    "done" -> "مكتمل • ${DownloadService.formatSize(t.done)} • اضغط للتشغيل"
+                    "running" -> "جارِ التحميل $pct% • $sz • اضغط للإيقاف"
+                    "paused" -> "متوقف $pct% • $sz • اضغط للاستئناف"
+                    "wifi" -> "بالانتظار للواي فاي • اضغط للاستئناف"
+                    "queued" -> "بالانتظار"
+                    else -> "فشل • اضغط للاستئناف" + if (t.error.isNotBlank()) " (${t.error.take(40)})" else ""
                 }
-                rows.reversed().forEach { r ->
-                    any = true
-                    val id = r[0] as Long; val st = r[2] as Int
-                    val title = DownloadNamer.nameOf(act, id) ?: (r[1] as String)
-                    val got = r[3] as Long; val tot = r[4] as Long
-                    val pct = if (tot > 0) (got * 100 / tot).toInt() else 0
-                    val status = when (st) {
-                        DownloadManager.STATUS_SUCCESSFUL -> "مكتمل • ${if (tot > 0) size(tot) else ""}"
-                        DownloadManager.STATUS_RUNNING -> "جارِ التحميل $pct% • ${size(got)} / ${if (tot > 0) size(tot) else "؟"}"
-                        DownloadManager.STATUS_PAUSED -> "متوقف مؤقتاً $pct%"
-                        DownloadManager.STATUS_PENDING -> "بالانتظار"
-                        else -> "فشل التحميل"
-                    }
-                    val card = LinearLayout(act).apply {
-                        orientation = LinearLayout.VERTICAL
-                        setPadding(px(14), px(10), px(14), px(10))
-                        background = GradientDrawable().apply { setColor(Color.parseColor("#0E0C1A")); cornerRadius = 14 * dp; setStroke(px(1), Color.parseColor("#2A2540")) }
-                        layoutParams = LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = px(8) }
-                    }
-                    card.addView(TextView(act).apply { text = title; setTextColor(Color.WHITE); textSize = 15f; setTypeface(typeface, Typeface.BOLD) })
-                    card.addView(TextView(act).apply { text = "\u200F$status"; setTextColor(if (st == DownloadManager.STATUS_FAILED) Color.parseColor("#FF7B93") else Color.parseColor("#A9A4C6")); textSize = 13f })
-                    if (st == DownloadManager.STATUS_RUNNING || st == DownloadManager.STATUS_PAUSED) {
-                        card.addView(android.widget.ProgressBar(act, null, android.R.attr.progressBarStyleHorizontal).apply {
-                            max = 100; progress = pct; progressDrawable = act.getDrawable(R.drawable.neon_progress)
-                        }, LinearLayout.LayoutParams(-1, px(5)).apply { topMargin = px(6) })
-                    }
-                    fun openExternal() {
-                        val uri = dm.getUriForDownloadedFile(id) ?: return
-                        try {
-                            act.startActivity(Intent.createChooser(Intent(Intent.ACTION_VIEW).setDataAndType(uri, dm.getMimeTypeForDownloadedFile(id)).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), "تشغيل بواسطة"))
-                        } catch (_: Throwable) { toast("ما لگينا تطبيق يفتح الملف") }
-                    }
-                    card.setOnClickListener {
-                        if (st != DownloadManager.STATUS_SUCCESSFUL) return@setOnClickListener
-                        val uri = dm.getUriForDownloadedFile(id) ?: return@setOnClickListener
-                        val mime = dm.getMimeTypeForDownloadedFile(id) ?: ""
-                        if (mime.startsWith("video") || title.lowercase().matches(Regex(".*\\.(mp4|mkv|webm|m4v|mov)$"))) {
-                            val sub = findSubtitle(title.substringBeforeLast('.'))
+                val card = LinearLayout(act).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(px(14), px(10), px(14), px(10))
+                    background = GradientDrawable().apply { setColor(Color.parseColor("#0E0C1A")); cornerRadius = 14 * dp; setStroke(px(1), Color.parseColor(if (t.status == "running") "#22E4FF" else "#2A2540")) }
+                    layoutParams = LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = px(8) }
+                }
+                card.addView(TextView(act).apply { text = t.name; setTextColor(Color.WHITE); textSize = 15f; setTypeface(typeface, Typeface.BOLD) })
+                card.addView(TextView(act).apply { text = "\u200F$status"; setTextColor(if (t.status == "failed") Color.parseColor("#FF7B93") else Color.parseColor("#A9A4C6")); textSize = 13f })
+                if (t.status != "done") {
+                    card.addView(android.widget.ProgressBar(act, null, android.R.attr.progressBarStyleHorizontal).apply {
+                        max = 100; progress = pct; isIndeterminate = t.status == "running" && t.total <= 0
+                        progressDrawable = act.getDrawable(R.drawable.neon_progress)
+                    }, LinearLayout.LayoutParams(-1, px(5)).apply { topMargin = px(6) })
+                }
+                val uri = if (t.uri.isNotEmpty()) Uri.parse(t.uri) else null
+                fun openExternal() {
+                    if (uri == null) return
+                    try {
+                        act.startActivity(Intent.createChooser(Intent(Intent.ACTION_VIEW).setDataAndType(uri, "video/*").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), "تشغيل بواسطة"))
+                    } catch (_: Throwable) { toast("ما لگينا تطبيق يفتح الملف") }
+                }
+                card.setOnClickListener {
+                    when (t.status) {
+                        "done" -> if (uri != null) {
+                            val sub = findSubtitle(t.name.substringBeforeLast('.'))
                             dialog.dismiss()
-                            PlayerActivity.start(act, uri, sub?.first, sub?.second, title)
-                        } else openExternal()
+                            PlayerActivity.start(act, uri, sub?.first, sub?.second, t.name)
+                        }
+                        "running", "queued" -> DownloadService.send(act, DownloadService.PAUSE, t.id)
+                        else -> DownloadService.send(act, DownloadService.START, t.id)
                     }
-                    card.setOnLongClickListener {
-                        AlertDialog.Builder(act, R.style.Theme_CNMovie_Dialog).setTitle(title)
-                            .setItems(arrayOf("تشغيل بتطبيق آخر", "حذف")) { _, w ->
-                                if (w == 0) openExternal()
-                                else { dm.remove(id); refresh() }
-                            }.show()
-                        true
-                    }
-                    list.addView(card)
+                    handler.postDelayed({ refresh() }, 400)
                 }
+                card.setOnLongClickListener {
+                    val opts = if (t.status == "done") arrayOf("تشغيل بتطبيق آخر", "حذف الملف") else arrayOf("إلغاء وحذف")
+                    AlertDialog.Builder(act, R.style.Theme_CNMovie_Dialog).setTitle(t.name)
+                        .setItems(opts) { _, w ->
+                            if (t.status == "done" && w == 0) openExternal()
+                            else { DownloadService.send(act, DownloadService.CANCEL, t.id); handler.postDelayed({ sig = ""; refresh() }, 500) }
+                        }.show()
+                    true
+                }
+                list.addView(card)
             }
-            if (!any) list.addView(TextView(act).apply {
+            if (tasks.isEmpty()) list.addView(TextView(act).apply {
                 text = "ماكو تحميلات بعد. شغّل فيلم واضغط زر التحميل."; setTextColor(Color.WHITE); textSize = 15f; setPadding(0, px(12), 0, px(12))
             })
         }
@@ -483,7 +474,6 @@ class MediaDownloader(private val act: AppCompatActivity, private val web: WebVi
             override fun run() { if (dialog.isShowing) { try { refresh() } catch (_: Throwable) { }; handler.postDelayed(this, 1000) } }
         }
         handler.postDelayed(tick, 1000)
-        toast("اضغط على الملف لتشغيله، ومطوّلاً لحذفه")
     }
 
     /** يدوّر على ملف ترجمة بنفس اسم الفيلم بمجلد CN.MOVIE */
@@ -782,20 +772,13 @@ class MediaDownloader(private val act: AppCompatActivity, private val web: WebVi
     private fun downloadFile(url: String, name: String) {
         try {
             val clean = safe(name)
-            val req = DownloadManager.Request(Uri.parse(url)).apply {
-                CookieManager.getInstance().getCookie(url)?.let { addRequestHeader("Cookie", it) }
-                addRequestHeader("User-Agent", web.settings.userAgentString)
-                web.url?.let { addRequestHeader("Referer", it) }
-                setTitle(clean)
-                setDescription("CN.MOVIE")
-                setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, "CN.MOVIE/$clean")
-                if (Prefs.get(act, Prefs.WIFI_ONLY, false)) { setAllowedOverMetered(false); setAllowedOverRoaming(false) }
-            }
-            val id = (act.getSystemService(AppCompatActivity.DOWNLOAD_SERVICE) as DownloadManager).enqueue(req)
-            DownloadNamer.remember(act, id, clean)
-            toast(if (Prefs.get(act, Prefs.WIFI_ONLY, false)) "بالانتظار للواي فاي: $clean" else "بدأ التحميل: $clean")
+            DownloadService.enqueue(act, url, clean, CookieManager.getInstance().getCookie(url) ?: "",
+                web.settings.userAgentString, web.url ?: "")
+            if (Build.VERSION.SDK_INT >= 33 && androidx.core.content.ContextCompat.checkSelfPermission(act, android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED)
+                androidx.core.app.ActivityCompat.requestPermissions(act, arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 41)
+            toast(if (Prefs.get(act, Prefs.WIFI_ONLY, false)) "انضاف للتحميلات (واي فاي فقط): $clean" else "بدأ التحميل: $clean")
         } catch (e: Exception) {
+            log("DL ERR ${e.message}")
             toast("تعذّر التحميل")
         }
     }

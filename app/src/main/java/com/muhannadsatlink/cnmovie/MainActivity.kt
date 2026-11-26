@@ -291,6 +291,7 @@ class MainActivity : AppCompatActivity() {
 
         if (savedInstanceState != null) web.restoreState(savedInstanceState) else web.loadUrl(HOME_URL)
         splash.postDelayed({ CrashLog.showIfAny(this); UpdateChecker.auto(this) }, INTRO_MS + 800)
+        if (intent?.getBooleanExtra("openDownloads", false) == true) splash.postDelayed({ downloader.showDownloads() }, INTRO_MS + 600)
     }
 
     private fun selectTab(index: Int) {
@@ -470,6 +471,11 @@ class MainActivity : AppCompatActivity() {
     override fun onPictureInPictureModeChanged(isInPip: Boolean, newConfig: android.content.res.Configuration) {
         super.onPictureInPictureModeChanged(isInPip, newConfig)
         player.visibility = if (isInPip || customView == null) View.GONE else View.VISIBLE
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        if (intent.getBooleanExtra("openDownloads", false)) downloader.showDownloads()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
