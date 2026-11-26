@@ -54,12 +54,25 @@
         </activity>
         <activity
             android:name=".PlayerActivity"
-            android:exported="false"
+            android:exported="true"
+            android:label="مشغّل CN"
             android:supportsPictureInPicture="true"
             android:resizeableActivity="true"
             android:launchMode="singleTask"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|smallestScreenSize"
-            android:theme="@style/Theme.CNMovie" />
+            android:theme="@style/Theme.CNMovie">
+            <!-- يطلع مشغّل CN بقائمة «فتح بواسطة» لأي فيديو بالجهاز -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="content" android:mimeType="video/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="file" android:mimeType="video/*" />
+            </intent-filter>
+        </activity>
         <service
             android:name=".DownloadService"
             android:exported="false"

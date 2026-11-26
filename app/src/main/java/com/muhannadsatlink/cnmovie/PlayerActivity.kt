@@ -114,6 +114,14 @@ class PlayerActivity : AppCompatActivity() {
         setContentView(root)
 
         val video = intent.data ?: run { finish(); return }
+        // انفتح من تطبيق ثاني (مدير الملفات...): ناخذ اسم الملف
+        if (intent.getStringExtra("title") == null) {
+            val n = try {
+                contentResolver.query(video, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+                    if (c.moveToFirst()) c.getString(0) else null }
+            } catch (_: Throwable) { null } ?: video.lastPathSegment ?: ""
+            intent.putExtra("title", n)
+        }
         // إذا ما انطت ترجمة، ندوّر على ملف بنفس اسم الفيلم
         if (intent.getStringExtra("sub") == null) {
             SubFinder.find(this, intent.getStringExtra("title") ?: "")?.let { (u, n) ->
@@ -122,7 +130,7 @@ class PlayerActivity : AppCompatActivity() {
         }
         val item = MediaItem.Builder().setUri(video)
         intent.getStringExtra("sub")?.let { s ->
-            val name = intent.getStringExtra("subName")?.lowercase() ?: ""
+            val name = intent.getStringExtra("subName")?.lowercase()?.removeSuffix(".txt") ?: ""
             val mime = when {
                 name.endsWith(".vtt") -> MimeTypes.TEXT_VTT
                 name.endsWith(".ass") || name.endsWith(".ssa") -> MimeTypes.TEXT_SSA

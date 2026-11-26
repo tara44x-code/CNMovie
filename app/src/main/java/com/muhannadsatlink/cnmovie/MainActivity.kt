@@ -151,6 +151,7 @@ class MainActivity : AppCompatActivity() {
         player.onPip = { enterPip() }
         root.addView(player, FrameLayout.LayoutParams(-1, -1))
         downloader = MediaDownloader(this, web)
+        downloader.onPickVideo = { pickVideo.launch(arrayOf("video/*")) }
         player.onDownload = { downloader.show() }
         // حفظ تسجيل الدخول (الكوكيز) بين مرات فتح التطبيق
         CookieManager.getInstance().setAcceptCookie(true)
@@ -451,6 +452,16 @@ class MainActivity : AppCompatActivity() {
             .setMessage(R.string.about_body)
             .setPositiveButton(R.string.close, null)
             .show()
+    }
+
+    // ---------- فتح فيديو من الجهاز بمشغّل CN ----------
+    private val pickVideo = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@registerForActivityResult
+        val name = try {
+            contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+                if (c.moveToFirst()) c.getString(0) else null }
+        } catch (_: Throwable) { null } ?: "فيديو"
+        PlayerActivity.start(this, uri, null, null, name)
     }
 
     // ---------- صورة داخل صورة ----------
