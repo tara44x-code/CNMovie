@@ -75,6 +75,7 @@ class MediaDownloader(private val act: AppCompatActivity, private val web: WebVi
         append("page: ${web.url}\n")
         synchronized(apiSeen) { apiSeen.forEach { append("API $it\n".take(240)) } }
         synchronized(diag) { diag.forEach { append(it.take(300)).append('\n') } }
+        append(CrashLog.notes(act))
     }
     private fun copyDiag() {
         val cm = act.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
@@ -395,6 +396,8 @@ class MediaDownloader(private val act: AppCompatActivity, private val web: WebVi
         val handler = android.os.Handler(android.os.Looper.getMainLooper())
         lateinit var dialog: AlertDialog
 
+        Thread { try { DownloadNamer.fixAll(act) } catch (_: Throwable) { } }.start()
+
         fun refresh() {
             list.removeAllViews()
             val c = try { dm.query(DownloadManager.Query()) } catch (_: Throwable) { null }
@@ -412,7 +415,8 @@ class MediaDownloader(private val act: AppCompatActivity, private val web: WebVi
                 }
                 rows.reversed().forEach { r ->
                     any = true
-                    val id = r[0] as Long; val title = r[1] as String; val st = r[2] as Int
+                    val id = r[0] as Long; val st = r[2] as Int
+                    val title = DownloadNamer.nameOf(act, id) ?: (r[1] as String)
                     val got = r[3] as Long; val tot = r[4] as Long
                     val pct = if (tot > 0) (got * 100 / tot).toInt() else 0
                     val status = when (st) {
@@ -788,7 +792,8 @@ class MediaDownloader(private val act: AppCompatActivity, private val web: WebVi
                 setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, "CN.MOVIE/$clean")
                 if (Prefs.get(act, Prefs.WIFI_ONLY, false)) { setAllowedOverMetered(false); setAllowedOverRoaming(false) }
             }
-            (act.getSystemService(AppCompatActivity.DOWNLOAD_SERVICE) as DownloadManager).enqueue(req)
+            val id = (act.getSystemService(AppCompatActivity.DOWNLOAD_SERVICE) as DownloadManager).enqueue(req)
+            DownloadNamer.remember(act, id, clean)
             toast(if (Prefs.get(act, Prefs.WIFI_ONLY, false)) "بالانتظار للواي فاي: $clean" else "بدأ التحميل: $clean")
         } catch (e: Exception) {
             toast("تعذّر التحميل")

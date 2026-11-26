@@ -28,6 +28,16 @@ object CrashLog {
         } catch (_: Throwable) { }
     }
 
+    /** ملاحظات تشخيص صغيرة (آخر 30 سطر) */
+    fun note(c: Context, s: String) {
+        try {
+            val f = File(c.filesDir, "notes.txt")
+            val lines = (if (f.exists()) f.readLines() else emptyList()).takeLast(29) + s.take(300)
+            f.writeText(lines.joinToString("\n"))
+        } catch (_: Throwable) { }
+    }
+    fun notes(c: Context): String = try { File(c.filesDir, "notes.txt").readText() } catch (_: Throwable) { "" }
+
     fun showIfAny(a: AppCompatActivity) {
         val f = file(a)
         if (!f.exists()) return
