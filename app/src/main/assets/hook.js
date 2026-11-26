@@ -57,7 +57,7 @@
     var of = window.fetch;
     if (of) window.fetch = function () {
       var u = arguments[0] && (arguments[0].url || arguments[0]);
-      return of.apply(this, arguments).then(function (r) {
+      return of.apply(window, arguments).then(function (r) {
         try { var ct = (r.headers.get('content-type') || ''); if (/json|text|javascript|octet|subrip|vtt/.test(ct) || /\.(srt|vtt|ass|ssa)(\?|$)/i.test(String(u))) r.clone().text().then(function (t) { scanText(t, u); }); } catch (e) {}
         return r;
       });

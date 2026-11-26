@@ -57,7 +57,7 @@
     var of = window.fetch;
     if (of) window.fetch = function () {
       var u = arguments[0] && (arguments[0].url || arguments[0]);
-      return of.apply(this, arguments).then(function (r) {
+      return of.apply(window, arguments).then(function (r) {
         try { var ct = (r.headers.get('content-type') || ''); if (/json|text|javascript|octet|subrip|vtt/.test(ct) || /\.(srt|vtt|ass|ssa)(\?|$)/i.test(String(u))) r.clone().text().then(function (t) { scanText(t, u); }); } catch (e) {}
         return r;
       });
@@ -216,30 +216,33 @@ window.CNSub = function (id, url, wantAr) {
   }, 200);
 
   // ---------- اسم وشعار CN.MOVIE بدل سينمانا ----------
-  function swapLogo(im) {
-    if (!window.__cnLogo || im.getAttribute('data-cnb')) return;
-    im.setAttribute('data-cnb', '1');
-    if (im.tagName === 'IMG') { im.src = window.__cnLogo; im.removeAttribute('srcset'); im.style.borderRadius = '10px'; return; }
-    var r = im.getBoundingClientRect(), n = document.createElement('img');
-    n.src = window.__cnLogo; n.setAttribute('data-cnb', '1');
-    n.style.cssText = 'width:' + Math.max(28, r.width) + 'px;height:' + Math.max(28, r.height) + 'px;border-radius:10px;vertical-align:middle';
-    im.parentNode.insertBefore(n, im); im.style.display = 'none';
-  }
+  // بالـ CSS فقط: ما نغيّر عناصر الموقع (تغييرها جان يخرّب الصفحة بعد تسجيل الدخول)
+  var bs = document.createElement('style');
+  bs.textContent =
+    '.cn-brand{font-size:0!important;color:transparent!important;white-space:nowrap}' +
+    '.cn-brand::before{content:"";display:inline-block;width:30px;height:30px;vertical-align:middle;margin-inline-end:8px;border-radius:8px;' +
+      (window.__cnLogo ? 'background:url(' + window.__cnLogo + ') center/contain no-repeat;' : '') + '}' +
+    '.cn-brand::after{content:"CN.MOVIE";direction:ltr;unicode-bidi:isolate;font-size:22px;font-weight:800;letter-spacing:1px;vertical-align:middle;' +
+      'background:linear-gradient(90deg,#fff 0 38%,#FF2BD6 38%);-webkit-background-clip:text;background-clip:text;color:transparent;' +
+      'filter:drop-shadow(0 0 6px rgba(34,228,255,.6))}' +
+    '.cn-oldlogo{display:none!important}';
+  (document.head || document.documentElement).appendChild(bs);
   function brand() {
     var els = document.querySelectorAll('span,div,h1,h2,h3,h4,p,a,b,strong');
     for (var i = 0; i < els.length; i++) {
       var e = els[i];
-      if (e.childElementCount !== 0 || e.getAttribute('data-cnb')) continue;
+      if (e.childElementCount !== 0 || e.classList.contains('cn-brand')) continue;
       var t = txt(e);
       if (t !== 'سينمانا' && t !== 'سينمــانا' && t !== 'سينمـــانا' && t.toLowerCase() !== 'cinemana') continue;
-      e.setAttribute('data-cnb', '1');
-      e.innerHTML = 'CN<span style="color:#FF2BD6;text-shadow:0 0 10px #FF2BD6">.MOVIE</span>';
-      e.style.direction = 'ltr'; e.style.color = '#fff'; e.style.fontWeight = '800';
-      e.style.letterSpacing = '1px'; e.style.textShadow = '0 0 10px #22E4FF';
+      e.classList.add('cn-brand');
       var box = e.parentElement;
       for (var up = 0; up < 3 && box; up++) {
-        var im = box.querySelector('img:not([data-cnb]),svg:not([data-cnb])');
-        if (im) { swapLogo(im); break; }
+        var im = box.querySelector('img:not(.cn-oldlogo),svg:not(.cn-oldlogo)');
+        if (im && !im.closest('.cn-brand')) {
+          var r = im.getBoundingClientRect();
+          if (r.width && r.width < 120) im.classList.add('cn-oldlogo');
+          break;
+        }
         box = box.parentElement;
       }
     }
