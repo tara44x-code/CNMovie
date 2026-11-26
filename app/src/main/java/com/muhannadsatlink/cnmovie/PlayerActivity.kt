@@ -69,18 +69,14 @@ class PlayerActivity : AppCompatActivity() {
         view = PlayerView(this).apply {
             this.player = this@PlayerActivity.player
             setShowSubtitleButton(true)
-            subtitleView?.apply {
-                setStyle(CaptionStyleCompat(Color.WHITE, Color.TRANSPARENT, Color.TRANSPARENT,
-                    CaptionStyleCompat.EDGE_TYPE_OUTLINE, Color.BLACK, Typeface.DEFAULT_BOLD))
-                setFixedTextSize(TypedValue.COMPLEX_UNIT_SP, 22f)
-                setApplyEmbeddedStyles(false)
-            }
         }
+        applySubStyle()
         root.addView(view, FrameLayout.LayoutParams(-1, -1))
 
         layer = PlayerGestureLayer(this, ExoControl())
         layer.target = view
         layer.onPip = { enterPip() }
+        if (intent.getStringExtra("sub") != null) layer.addPill("الترجمة") { subDialog() }
         root.addView(layer, FrameLayout.LayoutParams(-1, -1))
         setContentView(root)
 
@@ -106,6 +102,100 @@ class PlayerActivity : AppCompatActivity() {
             Toast.makeText(this, "كمّلنا من وين وقفت", Toast.LENGTH_SHORT).show()
         }
         player.playWhenReady = true
+    }
+
+    // ---------- تحكم بالترجمة: الحجم واللون والخلفية والتوقيت ----------
+    private val sizes = listOf("صغير" to 16f, "متوسط" to 22f, "كبير" to 28f, "ضخم" to 36f)
+    private val colors = listOf("أبيض" to Color.WHITE, "أصفر" to Color.parseColor("#FFE14D"), "سماوي" to Color.parseColor("#22E4FF"))
+    private var subDelay = 0L
+
+    private fun applySubStyle() {
+        val size = sizes[Prefs.getInt(this, "subSize", 1).coerceIn(0, sizes.size - 1)].second
+        val color = colors[Prefs.getInt(this, "subColor", 0).coerceIn(0, colors.size - 1)].second
+        val bg = Prefs.get(this, "subBg", false)
+        view.subtitleView?.apply {
+            setStyle(CaptionStyleCompat(color, if (bg) Color.parseColor("#99000000") else Color.TRANSPARENT, Color.TRANSPARENT,
+                if (bg) CaptionStyleCompat.EDGE_TYPE_NONE else CaptionStyleCompat.EDGE_TYPE_OUTLINE, Color.BLACK, Typeface.DEFAULT_BOLD))
+            setFixedTextSize(TypedValue.COMPLEX_UNIT_SP, size)
+            setApplyEmbeddedStyles(false)
+        }
+    }
+
+    private fun subDialog() {
+        val dp = resources.displayMetrics.density
+        fun px(v: Int) = (v * dp).toInt()
+        val pink = Color.parseColor("#FF2BD6")
+        val root = android.widget.LinearLayout(this).apply { orientation = android.widget.LinearLayout.VERTICAL; setPadding(px(20), px(6), px(20), px(6)); layoutDirection = View.LAYOUT_DIRECTION_RTL }
+        fun title(t: String) = root.addView(android.widget.TextView(this).apply { text = t; setTextColor(Color.parseColor("#22E4FF")); textSize = 14f; setPadding(0, px(12), 0, px(6)) })
+        fun row(items: List<String>, sel: () -> Int, onPick: (Int) -> Unit) {
+            val r = android.widget.LinearLayout(this)
+            val views = ArrayList<android.widget.TextView>()
+            fun paint() = views.forEachIndexed { i, v ->
+                val on = i == sel()
+                v.setTextColor(if (on) Color.WHITE else Color.parseColor("#A9A4C6"))
+                v.background = android.graphics.drawable.GradientDrawable().apply {
+                    cornerRadius = 16 * dp
+                    if (on) setColor(pink) else { setColor(Color.parseColor("#12101F")); setStroke(px(1), Color.parseColor("#2A2540")) }
+                }
+            }
+            items.forEachIndexed { i, t ->
+                val v = android.widget.TextView(this).apply {
+                    text = t; textSize = 14f; setPadding(px(14), px(7), px(14), px(7))
+                    setOnClickListener { onPick(i); paint() }
+                }
+                views += v
+                r.addView(v, android.widget.LinearLayout.LayoutParams(-2, -2).apply { marginEnd = px(8) })
+            }
+            paint(); root.addView(r)
+        }
+        title("حجم الخط")
+        row(sizes.map { it.first }, { Prefs.getInt(this, "subSize", 1) }) { Prefs.setInt(this, "subSize", it); applySubStyle() }
+        title("اللون")
+        row(colors.map { it.first }, { Prefs.getInt(this, "subColor", 0) }) { Prefs.setInt(this, "subColor", it); applySubStyle() }
+        title("الخلفية")
+        row(listOf("بدون", "خلفية سوداء"), { if (Prefs.get(this, "subBg", false)) 1 else 0 }) { Prefs.set(this, "subBg", it == 1); applySubStyle() }
+        title("التوقيت")
+        val delayLabel = android.widget.TextView(this).apply { textSize = 15f; setTextColor(Color.WHITE); gravity = android.view.Gravity.CENTER }
+        fun showDelay() { delayLabel.text = "\u200E" + (if (subDelay > 0) "+" else "") + String.format("%.1f", subDelay / 1000.0) + " ثانية" }
+        showDelay()
+        row(listOf("-1", "-0.5", "0", "+0.5", "+1"), { -1 }) { i ->
+            subDelay = when (i) { 0 -> subDelay - 1000; 1 -> subDelay - 500; 2 -> 0L; 3 -> subDelay + 500; else -> subDelay + 1000 }
+            showDelay(); applyDelay()
+        }
+        root.addView(delayLabel)
+        root.addView(android.widget.TextView(this).apply {
+            text = "سالب = الترجمة تطلع أبكر، موجب = تتأخر"; textSize = 12f; setTextColor(Color.parseColor("#8C88A8")); setPadding(0, px(4), 0, 0)
+        })
+        androidx.appcompat.app.AlertDialog.Builder(this, R.style.Theme_CNMovie_Dialog)
+            .setTitle("الترجمة")
+            .setView(android.widget.ScrollView(this).apply { addView(root) })
+            .setPositiveButton(R.string.close, null)
+            .show().window?.decorView?.setBackgroundColor(Color.parseColor("#12101F"))
+    }
+
+    private var shiftN = 0
+    private fun applyDelay() {
+        val src = intent.getStringExtra("sub") ?: return
+        val video = intent.data ?: return
+        Thread {
+            try {
+                val raw = contentResolver.openInputStream(Uri.parse(src))!!.use { it.readBytes() }
+                val cues = SubUtil.shift(SubUtil.parse(SubUtil.decode(raw)), subDelay)
+                cacheDir.listFiles { f -> f.name.startsWith("sub_shift_") }?.forEach { it.delete() }
+                val f = java.io.File(cacheDir, "sub_shift_${++shiftN}.srt")
+                f.writeText(SubUtil.toSrt(cues), Charsets.UTF_8)
+                runOnUiThread {
+                    val pos = player.currentPosition; val playing = player.playWhenReady
+                    val sp = player.playbackParameters
+                    player.setMediaItem(MediaItem.Builder().setUri(video).setSubtitleConfigurations(listOf(
+                        MediaItem.SubtitleConfiguration.Builder(Uri.fromFile(f)).setMimeType(MimeTypes.APPLICATION_SUBRIP)
+                            .setLanguage("ar").setLabel("عربي").setSelectionFlags(C.SELECTION_FLAG_DEFAULT).build())).build(), pos)
+                    player.prepare(); player.playbackParameters = sp; player.playWhenReady = playing
+                }
+            } catch (e: Throwable) {
+                runOnUiThread { Toast.makeText(this, "تعذّر تعديل التوقيت", Toast.LENGTH_SHORT).show() }
+            }
+        }.start()
     }
 
     private inner class ExoControl : PlayerControl {

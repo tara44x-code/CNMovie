@@ -280,6 +280,15 @@ window.CNSub = function (id, url, wantAr) {
           }
         }
         v.addEventListener('loadedmetadata', tryRestore);
+        // الحلقة التالية تلقائياً
+        v.addEventListener('ended', function () {
+          if (!(window.__cnOpt || {}).next) return;
+          try { CNApp.toast('الحلقة التالية بعد 5 ثواني…'); } catch (e) {}
+          setTimeout(function () {
+            if (!v.ended) return;
+            clickText(['الحلقة التالية', 'الحلقة القادمة', 'Next Episode', 'Next episode', 'التالي'], false);
+          }, 5000);
+        });
         v.addEventListener('playing', tryRestore);
         v.addEventListener('timeupdate', function () {
           if (!v.duration || !isFinite(v.duration) || Date.now() - last < 5000) return;
@@ -293,6 +302,25 @@ window.CNSub = function (id, url, wantAr) {
       })(v);
     }
   }
+
+  // ---------- تخطي المقدمة تلقائياً ----------
+  var lastSkip = 0;
+  function autoSkip() {
+    if (!(window.__cnOpt || {}).skip || Date.now() - lastSkip < 15000) return;
+    var els = document.querySelectorAll('button,a,[role=button],div,span');
+    for (var i = 0; i < els.length; i++) {
+      var e = els[i];
+      if (e.childElementCount > 2 || !visible(e)) continue;
+      var t = txt(e);
+      if (t === 'تخطي المقدمة' || t === 'تخطي المقدّمة' || /^skip intro$/i.test(t)) {
+        lastSkip = Date.now();
+        fire(e);
+        try { CNApp.toast('تخطينا المقدمة'); } catch (x) {}
+        return;
+      }
+    }
+  }
+  setInterval(autoSkip, 1000);
 
   var timer = null;
   new MutationObserver(function () {

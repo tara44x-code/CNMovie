@@ -166,6 +166,14 @@ class PlayerGestureLayer(private val act: AppCompatActivity, var ctl: PlayerCont
         unlockBtn.setOnClickListener { setLocked(false) }
     }
 
+    /** زر إضافي بأزرار المشغّل */
+    fun addPill(label: String, onClick: () -> Unit): TextView {
+        val t = pill(label)
+        t.setOnClickListener { onClick() }
+        topBar.addView(t, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { leftMargin = (10 * dp).toInt() })
+        return t
+    }
+
     private fun fmtSpeed(x: Float) = if (x == x.toInt().toFloat()) "${x.toInt()}x" else "${x}x"
 
     /** نرجّع السرعة المختارة بعد ما يتغيّر الفيديو */

@@ -79,10 +79,13 @@ class MainActivity : AppCompatActivity() {
     private val introStart = SystemClock.uptimeMillis()
     private val INTRO_MS = 7000L   // مدة شعار البداية
     private val INTRO_MAX_MS = 11000L
-    private val helperJs by lazy {
+    private val helperBody by lazy {
         val logo = android.util.Base64.encodeToString(assets.open("logo96.png").use { it.readBytes() }, android.util.Base64.NO_WRAP)
         "window.__cnLogo='data:image/png;base64,$logo';\n" + assets.open("cn.js").bufferedReader(Charsets.UTF_8).use { it.readText() }
     }
+    // الإعدادات تنقرأ كل مرة حتى أي تغيير يتطبّق فوراً
+    private val helperJs: String
+        get() = "window.__cnOpt={skip:${Prefs.get(this, Prefs.AUTO_SKIP, true)},next:${Prefs.get(this, Prefs.AUTO_NEXT, true)}};\n" + helperBody
     private lateinit var tabs: List<LinearLayout>
     private lateinit var player: PlayerGestureLayer
     private lateinit var root: FrameLayout
@@ -278,7 +281,7 @@ class MainActivity : AppCompatActivity() {
         tabs[3].setOnClickListener { downloader.showDownloads() }
         findViewById<ImageButton>(R.id.btnDownload).setOnClickListener { downloader.show() }
         findViewById<ImageButton>(R.id.btnRefresh).setOnClickListener { web.reload() }
-        findViewById<ImageButton>(R.id.btnAbout).setOnClickListener { showAbout() }
+        findViewById<ImageButton>(R.id.btnAbout).setOnClickListener { SettingsDialog.show(this) }
         findViewById<Button>(R.id.btnRetry).setOnClickListener {
             offline.visibility = View.GONE
             web.reload()
@@ -300,7 +303,7 @@ class MainActivity : AppCompatActivity() {
         })
 
         if (savedInstanceState != null) web.restoreState(savedInstanceState) else web.loadUrl(HOME_URL)
-        splash.postDelayed({ CrashLog.showIfAny(this) }, INTRO_MS + 800)
+        splash.postDelayed({ CrashLog.showIfAny(this); UpdateChecker.auto(this) }, INTRO_MS + 800)
     }
 
     private fun selectTab(index: Int) {
@@ -485,6 +488,44 @@ class MainActivity : AppCompatActivity() {
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         web.saveState(outState)
+    }
+
+    // ---------- قفل التطبيق ----------
+    private var lockView: View? = null
+    private var stoppedAt = 0L
+    private var unlocked = false
+
+    override fun onResume() {
+        super.onResume()
+        web.evaluateJavascript("window.__cnOpt={skip:${Prefs.get(this, Prefs.AUTO_SKIP, true)},next:${Prefs.get(this, Prefs.AUTO_NEXT, true)}};", null)
+        val away = stoppedAt > 0 && System.currentTimeMillis() - stoppedAt > 60_000
+        if (Prefs.get(this, Prefs.LOCK, false) && (!unlocked || away) && !(Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && isInPictureInPictureMode)) showLock()
+    }
+
+    override fun onStop() {
+        super.onStop()
+        stoppedAt = System.currentTimeMillis()
+    }
+
+    private fun showLock() {
+        if (lockView == null) {
+            val v = layoutInflater.inflate(R.layout.lock_screen, root, false)
+            v.findViewById<View>(R.id.btnUnlock).setOnClickListener { askUnlock() }
+            root.addView(v, FrameLayout.LayoutParams(-1, -1))
+            lockView = v
+        }
+        lockView!!.visibility = View.VISIBLE
+        lockView!!.bringToFront()
+        unlocked = false
+        askUnlock()
+    }
+
+    private fun askUnlock() {
+        if (!AppLock.available(this)) { unlocked = true; lockView?.visibility = View.GONE; return }
+        AppLock.prompt(this, {
+            unlocked = true; stoppedAt = 0
+            lockView?.visibility = View.GONE
+        }, { })
     }
 
     override fun onPause() {
