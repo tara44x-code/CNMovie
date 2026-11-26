@@ -14,6 +14,17 @@
     if (!o || d > 12) return;
     if (Array.isArray(o)) { for (var i = 0; i < o.length; i++) walk(o[i], d + 1); return; }
     if (typeof o !== 'object') return;
+    // اسم الفيلم/المسلسل من بيانات الموقع (للعنصر اللي رقمه موجود برابط الصفحة)
+    var en = o.en_title || o.enTitle || o.title_en || o.en_name, ar = o.ar_title || o.arTitle || o.title_ar || o.ar_name;
+    if ((typeof en === 'string' && en) || (typeof ar === 'string' && ar)) {
+      var oid = String(o.nb || o.id || o.videoId || o.video_id || '');
+      var here = oid.length >= 3 && location.href.indexOf(oid) !== -1;
+      if (here || !M.meta) M.meta = {
+        en: en || '', ar: ar || '', year: String(o.year || o.releaseYear || '').slice(0, 4),
+        season: o.season || o.seasonNumber || '', ep: o.episodeNummer || o.episodeNumber || o.episode || '',
+        series: String(o.kind || o.type || '').toLowerCase(), here: here
+      };
+    }
     var label = '';
     for (var k = 0; k < LKEYS.length && !label; k++) {
       var x = o[LKEYS[k]];

@@ -254,22 +254,8 @@ class MainActivity : AppCompatActivity() {
         }
 
         // التحميلات عبر مدير التنزيلات في أندرويد
-        web.setDownloadListener { url, userAgent, contentDisposition, mimeType, _ ->
-            try {
-                val name = URLUtil.guessFileName(url, contentDisposition, mimeType)
-                val req = DownloadManager.Request(Uri.parse(url)).apply {
-                    setMimeType(mimeType)
-                    addRequestHeader("cookie", CookieManager.getInstance().getCookie(url))
-                    addRequestHeader("User-Agent", userAgent)
-                    setTitle(name)
-                    setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                    setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, "CN.MOVIE/$name")
-                }
-                (getSystemService(DOWNLOAD_SERVICE) as DownloadManager).enqueue(req)
-                Toast.makeText(this, R.string.download_started, Toast.LENGTH_SHORT).show()
-            } catch (e: Exception) {
-                openExternal(Uri.parse(url))
-            }
+        web.setDownloadListener { url, _, contentDisposition, mimeType, _ ->
+            downloader.siteDownload(url, contentDisposition, mimeType)
         }
 
         // الشريط السفلي

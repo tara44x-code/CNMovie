@@ -121,7 +121,45 @@ class MediaDownloader(private val act: AppCompatActivity, private val web: WebVi
     }
 
     // ---------- النافذة ----------
-    fun show() {
+    // ---------- اسم الفيلم الحقيقي ----------
+    @Volatile private var cachedTitle = ""
+
+    private fun loadTitle(then: () -> Unit) {
+        web.evaluateJavascript(TITLE_JS) { raw ->
+            try {
+                val j = JSONObject(org.json.JSONTokener(raw).nextValue() as String)
+                cachedTitle = buildTitle(j)
+                log("TITLE '$cachedTitle' ${raw.take(300)}")
+            } catch (e: Throwable) { log("TITLE ERR ${e.message}") }
+            then()
+        }
+    }
+
+    private fun bad(t: String) = t.isBlank() || t.length < 2 ||
+        t.lowercase().let { it == "video" || it == "cinemana" || it == "cn.movie" || it.startsWith("http") } || t == "سينمانا"
+
+    private fun clean(t: String) = t.replace(Regex("\\s*[|\\-–]\\s*(سينمانا|Cinemana|CN\\.MOVIE|شبكتي).*$", RegexOption.IGNORE_CASE), "")
+        .replace(Regex("^(مشاهدة|تحميل|Watch)\\s+", RegexOption.IGNORE_CASE), "").trim()
+
+    private fun buildTitle(j: JSONObject): String {
+        j.optJSONObject("m")?.let { m ->
+            val en = m.optString("en").trim(); val ar = m.optString("ar").trim()
+            var name = if (!bad(en)) en else ar
+            if (!bad(name)) {
+                val s = m.optString("season").toIntOrNull(); val e = m.optString("ep").toIntOrNull()
+                if (s != null && e != null && s > 0 && e > 0) name += String.format(" S%02dE%02d", s, e)
+                else if (e != null && e > 0 && m.optString("series").contains("series")) name += String.format(" E%02d", e)
+                else m.optString("year").takeIf { it.length == 4 }?.let { name += " ($it)" }
+                return name
+            }
+        }
+        listOf("og", "h", "d").forEach { k -> val t = clean(j.optString(k)); if (!bad(t)) return t }
+        return ""
+    }
+
+    fun show() { loadTitle { showNow() } }
+
+    private fun showNow() {
         web.evaluateJavascript(SCAN_JS) { raw ->
             val videos = LinkedHashMap<String, String>()
             val subs = LinkedHashMap<String, String>()
@@ -177,7 +215,9 @@ class MediaDownloader(private val act: AppCompatActivity, private val web: WebVi
     }
 
     // ---------- فتح الفيديو بتطبيق ثاني (MX / VLC / غيرها) ----------
-    fun share() {
+    fun share() { loadTitle { shareNow() } }
+
+    private fun shareNow() {
         web.evaluateJavascript(SCAN_JS) { raw ->
             var video: String? = null
             var sub: String? = null
@@ -798,8 +838,18 @@ class MediaDownloader(private val act: AppCompatActivity, private val web: WebVi
 
     // ---------- أدوات ----------
     private fun title(): String {
-        val t = (web.title ?: "").replace(Regex("\\s*[|\\-–]\\s*(سينمانا|Cinemana).*$", RegexOption.IGNORE_CASE), "").trim()
-        return t.ifBlank { "CN.MOVIE" }
+        if (!bad(cachedTitle)) return cachedTitle
+        val t = clean(web.title ?: "")
+        return if (bad(t)) "CN.MOVIE ${java.text.SimpleDateFormat("yyyy-MM-dd HH-mm", java.util.Locale.US).format(java.util.Date())}" else t
+    }
+
+    /** تحميلات زر الموقع نفسه: نسمّيها باسم الفيلم بدل video */
+    fun siteDownload(url: String, contentDisposition: String?, mime: String?) {
+        loadTitle {
+            val guess = android.webkit.URLUtil.guessFileName(url, contentDisposition, mime)
+            val ext = guess.substringAfterLast('.', "mp4")
+            downloadFile(url, "${title()}.$ext")
+        }
     }
 
     private fun ext(u: String, def: String): String {
@@ -816,6 +866,10 @@ class MediaDownloader(private val act: AppCompatActivity, private val web: WebVi
         val SUB_EXT = listOf(".vtt", ".srt", ".ass", ".ssa")
 
         // يجمع روابط الفيديو والترجمة من الصفحة (وداخل iframe من نفس الموقع)
+        private const val TITLE_JS = "(function(){var M=window.__cnMedia||{};var og=document.querySelector('meta[property=\\\"og:title\\\"]');" +
+            "var h='';var hs=document.querySelectorAll('h1,h2,h3,[class*=title]');for(var i=0;i<hs.length;i++){var e=hs[i];if(!e.getClientRects().length)continue;" +
+            "var t=(e.innerText||'').replace(/\\s+/g,' ').trim();if(t.length>1&&t.length<90&&t!=='سينمانا'&&t.indexOf('CN.MOVIE')<0&&!/الإصدارات|رحلة داخل|أضيف مؤخر|المزيد/.test(t)){h=t;break}}" +
+            "return JSON.stringify({m:M.meta||null,og:og?og.content:'',h:h,d:document.title});})()"
         private const val SCAN_JS = "(function(){var V=[],S=[];function w(d){try{" +
             "d.querySelectorAll('video').forEach(function(v){if(v.currentSrc)V.push({src:v.currentSrc,label:v.videoHeight?v.videoHeight+'p':''});if(v.src)V.push({src:v.src,label:''});" +
             "v.querySelectorAll('source').forEach(function(s){V.push({src:s.src,label:s.getAttribute('label')||s.getAttribute('size')||s.getAttribute('res')||s.getAttribute('title')||''})});" +
