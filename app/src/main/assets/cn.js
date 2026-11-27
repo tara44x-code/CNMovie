@@ -229,9 +229,26 @@ window.CNSub = function (id, url, wantAr) {
     '.cn-brand::after{content:"CN.MOVIE";direction:ltr;unicode-bidi:isolate;font-size:22px;font-weight:800;letter-spacing:1px;vertical-align:middle;' +
       'background:linear-gradient(90deg,#fff 0 38%,#FF2BD6 38%);-webkit-background-clip:text;background-clip:text;color:transparent;' +
       'filter:drop-shadow(0 0 6px rgba(34,228,255,.6))}' +
-    '.cn-oldlogo{display:none!important}';
+    '.cn-oldlogo{display:none!important}' +
+    // أي صورة شعار لسينمانا بالموقع
+    'img[src*="logo" i],img[src*="cinemana" i],img[alt*="cinemana" i],img[alt*="سينمانا"],img[alt*="logo" i],' +
+    'svg[class*="logo" i],[class*="logo" i] > svg,[class*="logo" i] > img{display:none!important}';
   (document.head || document.documentElement).appendChild(bs);
+  // شعارات مرسومة كخلفية (background-image) أو صور صغيرة دائرية حمراء جنب الاسم
+  function hideOldLogos() {
+    var els = document.querySelectorAll('img:not(.cn-oldlogo),div,span,a,i');
+    for (var i = 0; i < els.length && i < 3000; i++) {
+      var e = els[i];
+      if (e.classList.contains('cn-oldlogo') || e.classList.contains('cn-brand')) continue;
+      var r = e.getBoundingClientRect();
+      if (!r.width || r.width > 140 || r.height > 140) continue;
+      var bg = e.tagName === 'IMG' ? (e.currentSrc || e.src || '') : getComputedStyle(e).backgroundImage;
+      if (bg && bg !== 'none' && /logo|cinemana|cinmana/i.test(bg) && !/data:image\/png;base64/.test(bg)) e.classList.add('cn-oldlogo');
+    }
+  }
+
   function brand() {
+    hideOldLogos();
     var els = document.querySelectorAll('span,div,h1,h2,h3,h4,p,a,b,strong');
     for (var i = 0; i < els.length; i++) {
       var e = els[i];
